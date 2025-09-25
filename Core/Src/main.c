@@ -18,16 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-//#include <stdio.h> //SWD
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
 #include <strings.h>
 #include "NRF24.h"
 #include "NRF24_reg_addresses.h"
-
-#define PLD_SIZE 32 //payload size; 32 = max for nrf
-#define tx //mode
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,7 +33,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define PLD_SIZE 12 //payload size; 32 = max for nrf
+#define RX_NUM 6 //number of receivers
+#define HEADER_SIZE 6    //num of bytes for header
+#define NUM_OF_CHANNELS   6   //num of bytes for data
+#define DMXPACKET_SIZE 513 //do not change
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,6 +51,14 @@ SPI_HandleTypeDef hspi1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+static uint8_t tx[RX_NUM][PLD_SIZE]; //RF transmit buffer
+static uint8_t dmxRX[513]; 			 //DMX receive buffer
+static uint8_t dmxPacketRdy=0; 	     //Flag - dmxPacketReady
+static uint16_t currentAddress=1; 	 //Current address of the DMX receiver
+static uint8_t rxActive=6; 			 //From 1 to RX_NUM;Number of active receivers, selected by user;
+//also changes the number of channels receiver listens to
+static uint8_t rxAssign[RX_NUM]; 	 //Assigned buffers to receivers, defined by user
+//static uint8_t ack[PLD_SIZE];
 
 /* USER CODE END PV */
 
@@ -65,18 +73,28 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#ifdef tx
-static uint8_t data_T[PLD_SIZE]={"Hello World!"};
-static uint8_t ack[PLD_SIZE];
-#else
-static uint8_t data_R[PLD_SIZE];
-static uint8_t ack_R[PLD_SIZE]= {"Job done!"};
-#endif
-/*int fputc(int ch, FILE *f) {
-    ITM_SendChar(ch);
-    return ch;
-}*/
-
+void fillPacketHeader(void)
+{
+	for(uint8_t i=0; i<RX_NUM; i++)
+	{
+		tx[i][0]=11*(i+1);
+	}
+}
+void rxAssign_set(void)
+{
+	//ToDo: Replace with GUI multiplexer
+	rxAssign[0]=0; //Receiver one (zero) is assigned to RX[0]
+	rxAssign[1]=0; //Receiver two is assigned to RX[1]
+	rxAssign[2]=0; //Receiver three is assigned to RX[2]
+	rxAssign[3]=0;
+	rxAssign[4]=0;
+	rxAssign[5]=0;
+}
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
+    dmxPacketRdy=1;
+}
 /* USER CODE END 0 */
 
 /**
@@ -87,7 +105,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  fillPacketHeader();
+  rxAssign_set();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -112,32 +131,49 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  //NRF24L01+ ------------------------------------------------------------------
   //warning - nrf24 tends to keep its registry even with no power
   //->settings must be applied each run
   nrf24_init();
   nrf24_tx_pwr(_0dbm);
   nrf24_data_rate(_1mbps);
   nrf24_set_channel(78);
-  nrf24_set_crc(en_crc, _1byte);
-  nrf24_pipe_pld_size(0, PLD_SIZE);
+  nrf24_set_crc(en_crc, _1byte); //Cyclic redundancy - receiver flushes broken packets
+  nrf24_pipe_pld_size(0, PLD_SIZE); //pipe 0;
   nrf24_dpl(disable); //disables dynamic payload
   uint8_t addr[5]={0x10, 0x21, 0x32, 0x43, 0x54};
   nrf24_open_tx_pipe(addr); //
   nrf24_open_rx_pipe(0, addr);
-
-#ifdef tx
-  nrf24_stop_listen();
-#else
-  nrf24_listen();
-#endif
-
+	#ifdef tx
+	  nrf24_stop_listen();
+	#else
+	  nrf24_listen();
+	#endif
+  //----------------------------------------------------------------------------
+  HAL_UART_Receive_IT(&huart1, dmxRX, 513);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-#ifdef tx
+	  if(dmxPacketRdy==1 && dmxRX[0]==0)
+	  {
+		  for(uint16_t i=currentAddress; i<NUM_OF_CHANNELS*RX_Active; i++)
+		  {
+
+		  }
+		  for(uint8_t i=0; i<RX_Active; i++)
+		  {
+		  	  memcpy(&tx[i][1], &dmxRX[currentAddress], NUM_OF_CHANNELS*RX_Active);
+		  }
+		  dmxPacketRdy=0;
+	  }
+	  if(timeToTransmit==1) //Timer's up, time to send refresh message
+	  {
+
+	  }
+/*#ifdef tx
 
 #else
 	  nrf24_listen();
@@ -151,7 +187,7 @@ int main(void)
 		  		  data_R[i]='\0';
 		  	  }
 	  }
-#endif
+#endif*/
       //printf("Tick\n");
       //HAL_Delay(1000);
     /* USER CODE END WHILE */
@@ -254,9 +290,9 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 250000;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.StopBits = UART_STOPBITS_2;
   huart1.Init.Parity = UART_PARITY_NONE;
   huart1.Init.Mode = UART_MODE_TX_RX;
   huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
