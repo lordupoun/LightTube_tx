@@ -13,6 +13,10 @@
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
   *
+  * Default packet structure:
+  * 1st byte - receiver number (11, 22, 33, 44, 55, 66)
+  * 2st byte - packet function (AA = CHANGE PARAMS; FF = Keep awake) //ToDo: Set new interval
+  *
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -33,11 +37,16 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define PLD_SIZE 12 //payload size; 32 = max for nrf
+#define PLD_SIZE 12 //payload size; 32 = max for nrf; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
 #define RX_NUM 6 //number of receivers
 #define HEADER_SIZE 6    //num of bytes for header
 #define NUM_OF_CHANNELS   6   //num of bytes for data
+#define DATA_START_POS 2 //Position of packet on which DMX data starts
 #define DMXPACKET_SIZE 513 //do not change
+#define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
+
+#define AWAKE_PACKET_LENGTH 2
+#define AWAK_PACKET_PERIOD 20 //20ms by default
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,11 +62,15 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 static uint8_t tx[RX_NUM][PLD_SIZE]; //RF transmit buffer
 static uint8_t dmxRX[513]; 			 //DMX receive buffer
+static uint8_t dmxRX_prev[513]; 	 //DMX data received in previous packet
 static uint8_t dmxPacketRdy=0; 	     //Flag - dmxPacketReady
 static uint16_t currentAddress=1; 	 //Current address of the DMX receiver
 static uint8_t rxActive=6; 			 //From 1 to RX_NUM;Number of active receivers, selected by user;
 //also changes the number of channels receiver listens to
 static uint8_t rxAssign[RX_NUM]; 	 //Assigned buffers to receivers, defined by user
+static uint8_t awakePacket[AWAKE_PACKET_LENGTH];
+awakePacket[1]=255;
+static uint32_t lastTick=0;
 //static uint8_t ack[PLD_SIZE];
 
 /* USER CODE END PV */
@@ -140,7 +153,7 @@ int main(void)
   nrf24_set_channel(78);
   nrf24_set_crc(en_crc, _1byte); //Cyclic redundancy - receiver flushes broken packets
   nrf24_pipe_pld_size(0, PLD_SIZE); //pipe 0;
-  nrf24_dpl(disable); //disables dynamic payload
+  nrf24_dpl(enable); //ToDo: Dynamic payload - think about it
   uint8_t addr[5]={0x10, 0x21, 0x32, 0x43, 0x54};
   nrf24_open_tx_pipe(addr); //
   nrf24_open_rx_pipe(0, addr);
@@ -157,21 +170,37 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if(dmxPacketRdy==1 && dmxRX[0]==0)
+	  //Send RF with data
+	  if(dmxPacketRdy==1) //if packet ready
 	  {
-		  for(uint16_t i=currentAddress; i<NUM_OF_CHANNELS*RX_Active; i++)
+		  if(dmxRX[0]==DMX_STARTBYTE) //don't listen to messages that are not meant for you...
 		  {
+			  for(uint16_t i=currentAddress; i<NUM_OF_CHANNELS*RX_Active; i++)//list packets that are used for LightTubes
+			  {
+				  if(dmxRX[i]!=dmxRX_prev[i])//if the packet changed
+				  {
+					  for(uint8_t i=0; i<RX_Active; i++)
+					  {
+						  memcpy(&tx[i][DATA_START_POS], &dmxRX[currentAddress+(NUM_OF_CHANNELS*i)], NUM_OF_CHANNELS); //copy them to according RX buffers
+						  nrf24_transmit(dmxRX[i], PLD_SIZE); //ToDo: Remove HAL_Delay from nrf library?
+						  //ToDo: Maybe add delay? If it doens't work - move it to timeToTransmit, and add a delay
+					  }
+					  break;
+				  }
+			  }
 
-		  }
-		  for(uint8_t i=0; i<RX_Active; i++)
-		  {
-		  	  memcpy(&tx[i][1], &dmxRX[currentAddress], NUM_OF_CHANNELS*RX_Active);
 		  }
 		  dmxPacketRdy=0;
 	  }
-	  if(timeToTransmit==1) //Timer's up, time to send refresh message
+	  //Send RF packet to keep receivers awake
+	  if(HAL_GetTick()-lastTick>AWAKE_PACKET_PERIOD)
 	  {
-
+		  for(uint8_t i=0; i<RX_Active; i++)
+		  {
+			  awakePacket[0]==11*(i+1);
+			  nrf24_transmit(awakePacket, AWAKE_PACKET_LENGTH);
+		  }
+		  lastTick=HAL_GetTick();
 	  }
 /*#ifdef tx
 
