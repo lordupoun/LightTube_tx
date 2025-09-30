@@ -37,17 +37,22 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+//RX defines
 #define PLD_SIZE 12 //payload size; 32 = max for nrf; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
-#define MAX_RX_NUM 6 //maximum number of unique receivers = max number of RX messages for one DMX packet
+#define MAX_RX_NUM 6 //maximum number of transmit groups for lights
 #define HEADER_SIZE 6    //num of bytes for header
 #define NUM_OF_CHANNELS   6   //num of bytes for data
-#define DATA_START_POS 2 //Position of packet on which DMX data starts
-#define DMXPACKET_SIZE 513 //do not change
-#define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
 
 #define AWAKE_PACKET_LENGTH 2
 #define AWAKE_PACKET_PERIOD 20 //20ms by default
 #define AWAKE_PACKET_MARK 0xFF
+
+//DMX defines
+#define DATA_START_POS 2 //Position of packet on which DMX data starts
+#define DMXPACKET_SIZE 513 //do not change
+#define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -62,14 +67,18 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 //ToDo: Rozmístit do samostatných souborů DMX a RF
-static uint8_t tx[MAX_RX_NUM][PLD_SIZE]; //RF transmit buffer
+
 static uint8_t dmxRX[513]; 			 	 //DMX receive buffer
 static uint8_t dmxRX_prev[513]; 	 //DMX data received in previous packet
 static uint8_t dmxPacketRdy=0; 	     //Flag - dmxPacketReady
 static uint16_t currentAddress=1; 	 //Current address of the DMX receiver
-//also changes the number of channels receiver listens to
-static uint8_t rxAssign[MAX_RX_NUM]; 	 //Assigned buffers to receivers, defined by user
-static uint8_t awakePacket[AWAKE_PACKET_LENGTH];
+
+
+static uint8_t tx[MAX_RX_NUM][PLD_SIZE]; //RF transmit buffer
+static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake packet
+static uint8_t active_RX=6; //also changes the number of channels receiver listens to
+static uint8_t *txAssigned[MAX_RX_NUM]; 	 //pointer to tx buffer ;txAssigned[0] -> tx buffer assigned to light number one
+
 
 //static uint8_t ack[PLD_SIZE];
 
@@ -86,36 +95,41 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void rxAssign_set(void)
+void assignBuffToGroups(void)
 {
-	//Co třeba 1 3 1 1 - -
-	//ToDo: rxAssign by mělo být pole ukazatelů; ale adresy musí jít VŽDY postupně dle active_RX, nešlo by to obejít ukazatelem?
-	//ToDo: Volat grafickou funkci
+	//0 = Nezapojeno
+	//ToDo: txAssigned by mělo být pole ukazatelů; ale adresy musí jít VŽDY postupně dle active_RX, nešlo by to obejít ukazatelem?
 	//ToDo: Replace with GUI multiplexerjí
 	//Pokud bych assignoval takto, a měl stovku zařízení, pro každý by se vysílal samostatný paket, a to je nesmysl
-	rxAssign[0]=1;
-	rxAssign[1]=1;
-	rxAssign[2]=1;
-	rxAssign[3]=1;
-	rxAssign[4]=1;
-	rxAssign[5]=1;
-	uint8_t a=0;
-	uint8_t b=0;
-	/*for(uint8_t i=0; i<MAX_RX_NUM; i++)
+	active_RX =0;
+	uint8_t rxCount[MAX_RX_NUM];
+	txAssigned[0]=tx[0]; //ToDo: Nahradit grafikou
+	txAssigned[1]=tx[0]; //ToDo: Nahradit grafikou
+	txAssigned[2]=tx[0]; //ToDo: Nahradit grafikou
+	txAssigned[3]=tx[0]; //ToDo: Nahradit grafikou
+	txAssigned[4]=tx[0]; //ToDo: Nahradit grafikou
+	txAssigned[5]=tx[0]; //ToDo: Nahradit grafikou
+	for(uint8_t i=0; i<MAX_RX_NUM; i++)
 	{
-		a=rxAssign[i]
-		if(rxAssign[i]=)
-	}*/
+		rxCount[txAssigned[i]]=rxCount[txAssigned[i]]+1;
+	}
+	for(uint8_t i=0; i<MAX_RX_NUM; i++)
+	{
+		if(rxCount[i]!=0)
+		{
+			active_RX=active_RX+1;
+		}
+	}
 	//Zde se vybere active_RX (kolik přijímačů je doopravdy aktivních), a spustí se funkce, která jim s ručně dělaným ACKEM přidělí nové adresy (11-66)
 	//Tím že mám active_RX, bude se vybírat jen tolik zpráv, kolik je potřeba
-	//foreach číslo v rxAssign který ještě nebylo
+	//foreach číslo v txAssigned který ještě nebylo
 	//Ale jak se pak vysílače, které budou mít všechny stejnou adresu, vrátí zpátky??
 }
-void addAdressToPacket(void) //adds address into header
+void addAdressToPacket(void) //adds address into the header
 {
 	for(uint8_t i=0; i<MAX_RX_NUM; i++)
 	{
-		tx[i][0]=rxAssign[i];
+		tx[i][0]=txAssigned[i];
 	}
 }
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -133,7 +147,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  rxAssign_set();
+  assignBuffToGroups();
   addAdressToPacket();
   /* USER CODE END 1 */
 
@@ -184,7 +198,7 @@ int main(void)
   while (1)
   {
 	  static uint32_t lastTick=0;
-	  static uint8_t active_RX=6; //ToDo: mělo by být pole pointerů ukazující přímo na daný RX buffer			 //From 1 to MAX_RX_NUM;Number of active receivers, selected by user;
+	  //ToDo: mělo by být pole pointerů ukazující přímo na daný RX buffer - stejně potřebuješ číslo kolik jich je			 //From 1 to MAX_RX_NUM;Number of active receivers, selected by user;
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 
 //--------------Do samostatné funkce void process_dmx(uint8_t *dmx_data) {
@@ -218,7 +232,7 @@ int main(void)
 	  {
 		  for(uint8_t i=0; i<active_RX; i++)
 		  {
-			  awakePacket[0]=rxAssign[i]; //ToDo: set address function
+			  awakePacket[0]=txAssigned[i]; //ToDo: set address function
 			  nrf24_transmit(awakePacket, AWAKE_PACKET_LENGTH);
 		  }
 		  lastTick=HAL_GetTick();
