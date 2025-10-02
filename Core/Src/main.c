@@ -38,17 +38,28 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 //RX defines
-#define PLD_SIZE 12 //payload size; 32 = max for nrf; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
-#define MAX_RX_NUM 6 //maximum number of transmit groups for lights
-#define HEADER_SIZE 6    //num of bytes for header
-#define NUM_OF_CHANNELS   6   //num of bytes for data
+//RX packet: 0-DeviceHW_Number (from DIP switch); 1-DeviceSW_Number (Address); 2-MessageType (DATA,MOD,AWAKE); 3-data
+//Device HW_NUMBER: 0-not used; 1-DIP SWITCH; 2-DIP SWITCH; 3-DIP SWITCH; ...
+//Device SW_NUMBER: assigned by transmitter for more effective transmission: 0-not used; 1;2;3;4;5;...
+//MOD: Address,
 
-#define AWAKE_PACKET_LENGTH 2
+#define COMMON_ADDRESS 0x00
+#define MAX_RX_NUM 6 //maximum number of transmit groups for lights
+#define NUM_OF_CHANNELS   6   //num of data bytes -> channels used by one receiver
+
+#define DATA_PACKET_LENGTH 12 //payload size; 32 = max for nrf; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
+#define DATA_PACKET_MARK 0xAA
+#define DATA_HEADER_SIZE 6    //num of bytes for header
+#define DATA_START_POS 3 //Position of packet on which DMX data starts
+
+#define MOD_PACKET_LENGTH 5
+#define MOD_ADDRESS_MARK 0xCC
+
+#define AWAKE_PACKET_LENGTH 3
 #define AWAKE_PACKET_PERIOD 20 //20ms by default
 #define AWAKE_PACKET_MARK 0xFF
 
 //DMX defines
-#define DATA_START_POS 2 //Position of packet on which DMX data starts
 #define DMXPACKET_SIZE 513 //do not change
 #define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
 
@@ -74,13 +85,13 @@ static uint8_t dmxPacketRdy=0; 	     //Flag - dmxPacketReady
 static uint16_t currentAddress=1; 	 //Current address of the DMX receiver
 
 
-static uint8_t tx[MAX_RX_NUM][PLD_SIZE]; //RF transmit buffer
-static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake packet
-static uint8_t active_RX=6; //also changes the number of channels receiver listens to
-static uint8_t *txAssigned[MAX_RX_NUM]; 	 //pointer to tx buffer ;txAssigned[0] -> tx buffer assigned to light number one
+static uint8_t dataPacket[MAX_RX_NUM][DATA_PACKET_LENGTH]; //RF transmit buffer; ToDo: Rename to dataPacket
+static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake packet; only one -> changes it's address in a for loop
+static uint8_t activeGroups;   //Number of receivers activated by user; also changes the number of channels receiver listens to
+static uint8_t *receiver[MAX_RX_NUM]; 	 //pointer to dataPacket; receiver[0] -> dataPacket assigned to receiver number one
 
 
-//static uint8_t ack[PLD_SIZE];
+//static uint8_t ack[DATA_PACKET_LENGTH];
 
 /* USER CODE END PV */
 
@@ -97,39 +108,68 @@ static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN 0 */
 void assignBuffToGroups(void)
 {
-	//0 = Nezapojeno
-	//ToDo: txAssigned by mělo být pole ukazatelů; ale adresy musí jít VŽDY postupně dle active_RX, nešlo by to obejít ukazatelem?
+	/*//null = not used
+	//ToDo: receiver by mělo být pole ukazatelů; ale adresy musí jít VŽDY postupně dle activeGroups, nešlo by to obejít ukazatelem?
 	//ToDo: Replace with GUI multiplexerjí
 	//Pokud bych assignoval takto, a měl stovku zařízení, pro každý by se vysílal samostatný paket, a to je nesmysl
-	active_RX =0;
+	activeGroups =0;
 	uint8_t rxCount[MAX_RX_NUM];
-	txAssigned[0]=tx[0]; //ToDo: Nahradit grafikou
-	txAssigned[1]=tx[0]; //ToDo: Nahradit grafikou
-	txAssigned[2]=tx[0]; //ToDo: Nahradit grafikou
-	txAssigned[3]=tx[0]; //ToDo: Nahradit grafikou
-	txAssigned[4]=tx[0]; //ToDo: Nahradit grafikou
-	txAssigned[5]=tx[0]; //ToDo: Nahradit grafikou
+	receiver[0]=dataPacket[1]; //ToDo: Nahradit grafikou
+	receiver[1]=dataPacket[1]; //ToDo: Nahradit grafikou
+	receiver[2]=dataPacket[1]; //ToDo: Nahradit grafikou
+	receiver[3]=dataPacket[2]; //ToDo: Nahradit grafikou
+	receiver[4]=NULL; //ToDo: Nahradit grafikou
+	receiver[5]=dataPacket[2]; //ToDo: Nahradit grafikou
 	for(uint8_t i=0; i<MAX_RX_NUM; i++)
 	{
-		rxCount[txAssigned[i]]=rxCount[txAssigned[i]]+1;
+		//rxCount[receiver[i]]=rxCount[receiver[i]]+1; //opravit
+
 	}
 	for(uint8_t i=0; i<MAX_RX_NUM; i++)
 	{
 		if(rxCount[i]!=0)
 		{
-			active_RX=active_RX+1;
+			activeGroups=activeGroups+1; //ToDo: dát do samostatné funkce?
 		}
 	}
-	//Zde se vybere active_RX (kolik přijímačů je doopravdy aktivních), a spustí se funkce, která jim s ručně dělaným ACKEM přidělí nové adresy (11-66)
-	//Tím že mám active_RX, bude se vybírat jen tolik zpráv, kolik je potřeba
-	//foreach číslo v txAssigned který ještě nebylo
+	//Nastavit novou adresu!
+	for(uint8_t i=0; i<MAX_RX_NUM; i++)
+	{
+		//For i<hw_id[i]
+		//zmen adresu receiveru 0 na 1
+		//zmen adresu receiveru 1 na 1
+		//zmen adresu receiveru 2 na 1
+		//zmen adresu receiveru 3 na 3
+		//zmen adresu receiveru 4 na NULL
+		//zmen adresu receiveru 5 na 3
+
+		//spočítat activeGroups=2
+
+		//dataPacket[0]=1
+		//dataPacket[1]=3
+	}*/
+	receiverGroup[1]=1 //skupina receivru 1 je jedna
+	receiverGroup[2]=1 //skupina receivru 2 je jedna
+	receiverGroup[3]=2
+	receiverGroup[4]=1
+	receiverGroup[5]=3
+	receiverGroup[6]=1
+	activeGroupCount=3
+
+	//POZOR - zcela opomene mapu, kterou uzivatel vytvoril -> vytvori si vlastni cislovani pro rychlejsi kod
+	for activegroupcount
+		dataPacket[i][1]=address[i]; //address[i je promenna s pouzivanou adresaci
+
+	for nastav adresy zatizenim
+
+	//Zde se vybere activeGroups (kolik přijímačů je doopravdy aktivních), a spustí se funkce, která jim s ručně dělaným ACKEM přidělí nové adresy (11-66)
 	//Ale jak se pak vysílače, které budou mít všechny stejnou adresu, vrátí zpátky??
 }
 void addAdressToPacket(void) //adds address into the header
 {
 	for(uint8_t i=0; i<MAX_RX_NUM; i++)
 	{
-		tx[i][0]=txAssigned[i];
+		dataPacket[i][0]=i+1;
 	}
 }
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -181,14 +221,16 @@ int main(void)
   nrf24_data_rate(_1mbps);
   nrf24_set_channel(78); //ToDo: Set channel variable - send message with ACK? (or self implemented ack)
   nrf24_set_crc(en_crc, _1byte); //Cyclic redundancy - receiver flushes broken packets
-  nrf24_pipe_pld_size(0, PLD_SIZE); //pipe 0;
+  nrf24_pipe_pld_size(0, DATA_PACKET_LENGTH); //pipe 0;
   nrf24_dpl(enable); //ToDo: Dynamic payload - think about it
   uint8_t addr[5]={0x10, 0x21, 0x32, 0x43, 0x54};
   nrf24_open_tx_pipe(addr); //
   //nrf24_open_rx_pipe(0, addr);
   nrf24_stop_listen();
   //----------------------------------------------------------------------------
-  awakePacket[1]=AWAKE_PACKET_MARK;
+  awakePacket[0]=COMMON_ADDRESS;
+  awakePacket[2]=AWAKE_PACKET_MARK;
+
   HAL_UART_Receive_IT(&huart1, dmxRX, 513);
   /* USER CODE END 2 */
 
@@ -198,22 +240,22 @@ int main(void)
   while (1)
   {
 	  static uint32_t lastTick=0;
-	  //ToDo: mělo by být pole pointerů ukazující přímo na daný RX buffer - stejně potřebuješ číslo kolik jich je			 //From 1 to MAX_RX_NUM;Number of active receivers, selected by user;
+
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 
-//--------------Do samostatné funkce void process_dmx(uint8_t *dmx_data) {
+//--------------ToDo: Do samostatné funkce void process_dmx(uint8_t *dmx_data) {
 	  if(dmxPacketRdy==1) //if packet ready
 	  {
 		  if(dmxRX[0]==DMX_STARTBYTE) //don't listen to messages that are not meant for you...
 		  {
-			  for(uint16_t i=currentAddress; i<NUM_OF_CHANNELS*active_RX; i++)//list packets that are used for LightTubes
+			  for(uint16_t i=currentAddress; i<NUM_OF_CHANNELS*activeGroups; i++)//list packets that are used for LightTubes
 			  {
 				  if(dmxRX[i]!=dmxRX_prev[i])//if the packet changed
 				  {
-					  for(uint8_t i=0; i<active_RX; i++)
+					  for(uint8_t i=0; i<activeGroups; i++)
 					  {
-						  memcpy(&tx[i][DATA_START_POS], &dmxRX[currentAddress+(NUM_OF_CHANNELS*i)], NUM_OF_CHANNELS); //copy them to according RX buffers
-						  nrf24_transmit(tx[i], PLD_SIZE); //Sends only as many RF messages, as there are active receivers; but only MAX_RX_NUM
+						  memcpy(&dataPacket[i][DATA_START_POS], &dmxRX[currentAddress+(NUM_OF_CHANNELS*i)], NUM_OF_CHANNELS); //copy them to according RX buffers
+						  nrf24_transmit(dataPacket[i], DATA_PACKET_LENGTH); //Sends only as many RF messages, as there are active receivers; but only MAX_RX_NUM
 						  //ToDo: Remove HAL_Delay from nrf library?
 						  //ToDo: Maybe add delay? If it doens't work - move it to timeToTransmit, make a flag, and add a delay
 					  }
@@ -225,14 +267,13 @@ int main(void)
 		  dmxPacketRdy=0;
 	  }
 //--------------
-   //ToDo: Zkontrolovat warningy
-	  //ToDo: Kam pointery
 	  //Send RF packet to keep receivers awake
+	  //ToDo: set address function
 	  if(HAL_GetTick()-lastTick>AWAKE_PACKET_PERIOD)
 	  {
-		  for(uint8_t i=0; i<active_RX; i++)
+		  for(uint8_t i=0; i<activeGroups; i++) //awake packet doesnt isnt multi dimensional array
 		  {
-			  awakePacket[0]=txAssigned[i]; //ToDo: set address function
+			  awakePacket[1]=i+1;
 			  nrf24_transmit(awakePacket, AWAKE_PACKET_LENGTH);
 		  }
 		  lastTick=HAL_GetTick();
