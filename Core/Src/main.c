@@ -28,6 +28,7 @@
 #include <string.h> //memcpy
 #include "NRF24.h"
 #include "NRF24_reg_addresses.h"
+#include "i2c_lcd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,7 +64,7 @@
 #define DMXPACKET_SIZE 513 //do not change
 #define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
 
-
+I2C_LCD_HandleTypeDef lcd1;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,6 +73,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef hi2c2;
+
 SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart1;
@@ -100,6 +104,8 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_I2C1_Init(void);
+static void MX_I2C2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -147,7 +153,7 @@ void assignBuffToGroups(void)
 
 		//dataPacket[0]=1
 		//dataPacket[1]=3
-	}*/
+	}*//*/
 	receiverGroup[1]=1 //skupina receivru 1 je jedna
 	receiverGroup[2]=1 //skupina receivru 2 je jedna
 	receiverGroup[3]=2
@@ -164,6 +170,7 @@ void assignBuffToGroups(void)
 
 	//Zde se vybere activeGroups (kolik přijímačů je doopravdy aktivních), a spustí se funkce, která jim s ručně dělaným ACKEM přidělí nové adresy (11-66)
 	//Ale jak se pak vysílače, které budou mít všechny stejnou adresu, vrátí zpátky??
+*/
 }
 void addAdressToPacket(void) //adds address into the header
 {
@@ -187,8 +194,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  assignBuffToGroups();
-  addAdressToPacket();
+  //assignBuffToGroups();
+  //addAdressToPacket();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -211,7 +218,18 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   MX_USART1_UART_Init();
+  MX_I2C1_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
+  //HAL_Delay(100);
+  lcd1.hi2c = &hi2c1;
+  lcd1.address = (0x27 << 1);
+  lcd_init(&lcd1);
+  //HAL_Delay(100);
+
+  lcd_gotoxy(&lcd1, 0, 0);
+  lcd_puts(&lcd1, "LightTube");
+
 
   //NRF24L01+ ------------------------------------------------------------------
   //warning - nrf24 tends to keep its registry even with no power
@@ -230,8 +248,11 @@ int main(void)
   //----------------------------------------------------------------------------
   awakePacket[0]=COMMON_ADDRESS;
   awakePacket[2]=AWAKE_PACKET_MARK;
+	HAL_Delay(2000);
 
   HAL_UART_Receive_IT(&huart1, dmxRX, 513);
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -342,6 +363,74 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.ClockSpeed = 100000;
+  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
+
+}
+
+/**
   * @brief SPI1 Initialization Function
   * @param None
   * @retval None
@@ -427,6 +516,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, CSN_Pin|CE_Pin, GPIO_PIN_RESET);
