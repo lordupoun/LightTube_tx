@@ -179,9 +179,9 @@ void addAdressToPacket(void) //adds address into the header
 		dataPacket[i][0]=i+1;
 	}
 }
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
-    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE); //DMXPACKET_SIZE
     dmxPacketRdy=1;
 }
 /* USER CODE END 0 */
@@ -250,7 +250,13 @@ int main(void)
   awakePacket[2]=AWAKE_PACKET_MARK;
 	HAL_Delay(2000);
 
-  HAL_UART_Receive_IT(&huart1, dmxRX, 513);
+//ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
+  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
+  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
+
+
 
 
   /* USER CODE END 2 */
@@ -260,7 +266,19 @@ int main(void)
   //ToDo: ASSIGN
   while (1)
   {
+	  //lcd_gotoxy(&lcd1, 0, 1);
+	  //lcd_puts(&lcd1, "   ");
+	  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
 	  static uint32_t lastTick=0;
+
+	  //---
+	    char buffer[16];  // buffer pro převod čísla na text
+
+	    sprintf(buffer, "%d", dmxRX[25+1]);  // převede int -> text //offset
+	  lcd_gotoxy(&lcd1, 0, 1);
+	  lcd_puts(&lcd1, buffer);
+	  //dmxRX[1]=5;
+	  //---
 
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 
