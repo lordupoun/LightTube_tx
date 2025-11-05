@@ -26,8 +26,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h> //memcpy
-#include "NRF24.h"
-#include "NRF24_reg_addresses.h"
 #include "i2c_lcd.h"
 /* USER CODE END Includes */
 
@@ -48,7 +46,7 @@
 #define MAX_RX_NUM 6 //maximum number of transmit groups for lights
 #define NUM_OF_CHANNELS   6   //num of data bytes -> channels used by one receiver
 
-#define DATA_PACKET_LENGTH 12 //payload size; 32 = max for nrf; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
+#define DATA_PACKET_LENGTH 12 //payload size; 64 = max for SI4432; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
 #define DATA_PACKET_MARK 0xAA
 #define DATA_HEADER_SIZE 6    //num of bytes for header
 #define DATA_START_POS 3 //Position of packet on which DMX data starts
@@ -74,9 +72,8 @@ I2C_LCD_HandleTypeDef lcd1;
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
-I2C_HandleTypeDef hi2c2;
 
-SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi2;
 
 UART_HandleTypeDef huart1;
 
@@ -102,76 +99,17 @@ static uint8_t *receiver[MAX_RX_NUM]; 	 //pointer to dataPacket; receiver[0] -> 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_I2C2_Init(void);
+static void MX_SPI2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void assignBuffToGroups(void)
-{
-	/*//null = not used
-	//ToDo: receiver by mělo být pole ukazatelů; ale adresy musí jít VŽDY postupně dle activeGroups, nešlo by to obejít ukazatelem?
-	//ToDo: Replace with GUI multiplexerjí
-	//Pokud bych assignoval takto, a měl stovku zařízení, pro každý by se vysílal samostatný paket, a to je nesmysl
-	activeGroups =0;
-	uint8_t rxCount[MAX_RX_NUM];
-	receiver[0]=dataPacket[1]; //ToDo: Nahradit grafikou
-	receiver[1]=dataPacket[1]; //ToDo: Nahradit grafikou
-	receiver[2]=dataPacket[1]; //ToDo: Nahradit grafikou
-	receiver[3]=dataPacket[2]; //ToDo: Nahradit grafikou
-	receiver[4]=NULL; //ToDo: Nahradit grafikou
-	receiver[5]=dataPacket[2]; //ToDo: Nahradit grafikou
-	for(uint8_t i=0; i<MAX_RX_NUM; i++)
-	{
-		//rxCount[receiver[i]]=rxCount[receiver[i]]+1; //opravit
 
-	}
-	for(uint8_t i=0; i<MAX_RX_NUM; i++)
-	{
-		if(rxCount[i]!=0)
-		{
-			activeGroups=activeGroups+1; //ToDo: dát do samostatné funkce?
-		}
-	}
-	//Nastavit novou adresu!
-	for(uint8_t i=0; i<MAX_RX_NUM; i++)
-	{
-		//For i<hw_id[i]
-		//zmen adresu receiveru 0 na 1
-		//zmen adresu receiveru 1 na 1
-		//zmen adresu receiveru 2 na 1
-		//zmen adresu receiveru 3 na 3
-		//zmen adresu receiveru 4 na NULL
-		//zmen adresu receiveru 5 na 3
 
-		//spočítat activeGroups=2
-
-		//dataPacket[0]=1
-		//dataPacket[1]=3
-	}*//*/
-	receiverGroup[1]=1 //skupina receivru 1 je jedna
-	receiverGroup[2]=1 //skupina receivru 2 je jedna
-	receiverGroup[3]=2
-	receiverGroup[4]=1
-	receiverGroup[5]=3
-	receiverGroup[6]=1
-	activeGroupCount=3
-
-	//POZOR - zcela opomene mapu, kterou uzivatel vytvoril -> vytvori si vlastni cislovani pro rychlejsi kod
-	for activegroupcount
-		dataPacket[i][1]=address[i]; //address[i je promenna s pouzivanou adresaci
-
-	for nastav adresy zatizenim
-
-	//Zde se vybere activeGroups (kolik přijímačů je doopravdy aktivních), a spustí se funkce, která jim s ručně dělaným ACKEM přidělí nové adresy (11-66)
-	//Ale jak se pak vysílače, které budou mít všechny stejnou adresu, vrátí zpátky??
-*/
-}
 void addAdressToPacket(void) //adds address into the header
 {
 	for(uint8_t i=0; i<MAX_RX_NUM; i++)
@@ -216,10 +154,9 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_I2C1_Init();
-  MX_I2C2_Init();
+  MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   //HAL_Delay(100);
   lcd1.hi2c = &hi2c1;
@@ -231,31 +168,13 @@ int main(void)
   lcd_puts(&lcd1, "LightTube");
 
 
-  //NRF24L01+ ------------------------------------------------------------------
-  //warning - nrf24 tends to keep its registry even with no power
-  //->settings must be applied each run
-  nrf24_init();
-  nrf24_tx_pwr(_0dbm);
-  nrf24_data_rate(_1mbps);
-  nrf24_set_channel(78); //ToDo: Set channel variable - send message with ACK? (or self implemented ack)
-  nrf24_set_crc(en_crc, _1byte); //Cyclic redundancy - receiver flushes broken packets
-  nrf24_pipe_pld_size(0, DATA_PACKET_LENGTH); //pipe 0;
-  nrf24_dpl(enable); //ToDo: Dynamic payload - think about it
-  uint8_t addr[5]={0x10, 0x21, 0x32, 0x43, 0x54};
-  nrf24_open_tx_pipe(addr); //
-  //nrf24_open_rx_pipe(0, addr);
-  nrf24_stop_listen();
-  //----------------------------------------------------------------------------
   awakePacket[0]=COMMON_ADDRESS;
   awakePacket[2]=AWAKE_PACKET_MARK;
-	HAL_Delay(2000);
+  HAL_Delay(2000);
 
-//ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
+  //ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
   HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
   HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
-  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
-  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
-
 
 
 
@@ -305,6 +224,9 @@ int main(void)
 		  }
 		  dmxPacketRdy=0;
 	  }
+	  //if dmxPacketRdy -> rfPacketRdy
+	  //if rfPacketRdy -> odesli
+	  //if
 //--------------
 	  //Send RF packet to keep receivers awake
 	  //ToDo: set address function
@@ -317,23 +239,6 @@ int main(void)
 		  }
 		  lastTick=HAL_GetTick();
 	  }
-/*#ifdef tx
-
-#else
-	  nrf24_listen();
-	  if(nrf24_data_available()){
-		  nrf24_receive(data_R, sizeof(data_R));
-		  char tmp[40];
-		  sprintf(tmp, "| %s |\r\n", data_R);
-		  HAL_UART_Transmit(&huart1, tmp, strlen(tmp), 100);
-		  for(uint8_t i=0; i<sizeof(data_R); i++)
-		  	  {
-		  		  data_R[i]='\0';
-		  	  }
-	  }
-#endif*/
-      //printf("Tick\n");
-      //HAL_Delay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -359,7 +264,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL8;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -415,74 +320,40 @@ static void MX_I2C1_Init(void)
 }
 
 /**
-  * @brief I2C2 Initialization Function
+  * @brief SPI2 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_I2C2_Init(void)
+static void MX_SPI2_Init(void)
 {
 
-  /* USER CODE BEGIN I2C2_Init 0 */
+  /* USER CODE BEGIN SPI2_Init 0 */
 
-  /* USER CODE END I2C2_Init 0 */
+  /* USER CODE END SPI2_Init 0 */
 
-  /* USER CODE BEGIN I2C2_Init 1 */
+  /* USER CODE BEGIN SPI2_Init 1 */
 
-  /* USER CODE END I2C2_Init 1 */
-  hi2c2.Instance = I2C2;
-  hi2c2.Init.ClockSpeed = 100000;
-  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c2.Init.OwnAddress1 = 0;
-  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c2.Init.OwnAddress2 = 0;
-  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  /* USER CODE END SPI2_Init 1 */
+  /* SPI2 parameter configuration*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN I2C2_Init 2 */
+  /* USER CODE BEGIN SPI2_Init 2 */
 
-  /* USER CODE END I2C2_Init 2 */
-
-}
-
-/**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
+  /* USER CODE END SPI2_Init 2 */
 
 }
 
@@ -533,28 +404,28 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, CSN_Pin|CE_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(SPI2_GPIO_NSS_GPIO_Port, SPI2_GPIO_NSS_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PA0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  /*Configure GPIO pin : SPI2_IRQ_Pin */
+  GPIO_InitStruct.Pin = SPI2_IRQ_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(SPI2_IRQ_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : CSN_Pin CE_Pin */
-  GPIO_InitStruct.Pin = CSN_Pin|CE_Pin;
+  /*Configure GPIO pin : SPI2_GPIO_NSS_Pin */
+  GPIO_InitStruct.Pin = SPI2_GPIO_NSS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  HAL_GPIO_Init(SPI2_GPIO_NSS_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
