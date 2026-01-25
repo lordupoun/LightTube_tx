@@ -26,6 +26,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h> //memcpy
+#include <stdbool.h> //bool
+#include "si4432.h"
 #include "i2c_lcd.h"
 /* USER CODE END Includes */
 
@@ -44,7 +46,9 @@
 
 #define COMMON_ADDRESS 0x00
 #define MAX_RX_NUM 6 //maximum number of transmit groups for lights
+
 #define NUM_OF_CHANNELS   6   //num of data bytes -> channels used by one receiver
+#define NUM_OF_RECEIVERS  1
 
 #define DATA_PACKET_LENGTH 12 //payload size; 64 = max for SI4432; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
 #define DATA_PACKET_MARK 0xAA
@@ -80,19 +84,20 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 //ToDo: Rozmístit do samostatných souborů DMX a RF
 
-static uint8_t dmxRX[513]; 			 	 //DMX receive buffer
-static uint8_t dmxRX_prev[513]; 	 //DMX data received in previous packet
-static uint8_t dmxPacketRdy=0; 	     //Flag - dmxPacketReady
-static uint16_t currentAddress=1; 	 //Current address of the DMX receiver
+static uint8_t dmxRX[514]; 			 	 //DMX receive buffer
+static uint8_t dmxPacket[513]; 	 //One received DMX packet
+static uint8_t dmxPrevPacket[513]; 	//One previously received DMX packet
+static bool dmxPacketRdy=false; 	     //Flag - dmxPacketReady
+static bool readyToTransmit=true;
+static uint16_t currentDMXAddress=1; 	 //Current address of the DMX receiver
+uint8_t toSendPacket[6];
 
 
 static uint8_t dataPacket[MAX_RX_NUM][DATA_PACKET_LENGTH]; //RF transmit buffer; ToDo: Rename to dataPacket
+
 static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake packet; only one -> changes it's address in a for loop
-static uint8_t activeGroups;   //Number of receivers activated by user; also changes the number of channels receiver listens to
-static uint8_t *receiver[MAX_RX_NUM]; 	 //pointer to dataPacket; receiver[0] -> dataPacket assigned to receiver number one
 
 
-//static uint8_t ack[DATA_PACKET_LENGTH];
 
 /* USER CODE END PV */
 
@@ -117,10 +122,50 @@ void addAdressToPacket(void) //adds address into the header
 		dataPacket[i][0]=i+1;
 	}
 }
+
+//---DMX receiving Callback---
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
-    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE); //DMXPACKET_SIZE
-    dmxPacketRdy=1;
+	//memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
+	//memcpy(&dmxPacket[0], &dmxRX[1], DMXPACKET_SIZE);
+
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514); //DMXPACKET_SIZE
+    dmxPacketRdy=true;
+    //dmxPacket[3]=255;
+    //HAL_Delay(5000);
+}
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        // Prisel BREAK (Framing Error) -> Restartujeme prijem
+
+        HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
+        //dmxPacketRdy=true;
+    }
+}
+//---RF EXTI Callback---
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	//EXTI for RF module (SI4432)
+	if (GPIO_Pin == GPIO_PIN_11)
+	{
+    	uint8_t b; //jen pro reset 0x03 registru
+    	SI44_Read(0x04, &b, 1);
+        SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
+        readyToTransmit=true;
+
+        //What caused the interrupt?
+		/*switch(b)
+		{
+		case(0b00000100): //TX done
+				readyToTransmit=true;
+				break;
+		case(0b00000010): //RX done
+				//rxDoneFlag=true; - in case of receiving
+				break;
+		}*/
+	}
 }
 /* USER CODE END 0 */
 
@@ -132,8 +177,14 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  //assignBuffToGroups();
-  //addAdressToPacket();
+
+	dmxPacket[0]=0;
+	dmxPacket[1]=255;
+	dmxPacket[2]=255;
+	dmxPacket[3]=0;
+	dmxPacket[4]=0;
+	dmxPacket[5]=0;
+	dmxPacket[6]=0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -158,37 +209,68 @@ int main(void)
   MX_I2C1_Init();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
-  //HAL_Delay(100);
+  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
+  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
+
+  //---Initialize:---
+
+  //---SI4432--- //musi byt pred SI, jinak se buguje jako krava
+  SI44_Init(&hspi2, GPIOB, GPIO_PIN_12);
+  HAL_Delay(500); //ToDo: zkratit
+  SI44_PresetConfig();
+  SI44_SetAGCMode(0b00100000); //6th bit - sgin
+  SI44_SetInterrupts1(0b00000100); //1st bit = CRC error
+  SI44_SetInterrupts2(0b00000000);
+  SI44_SetTXPower(SI44_TX_POWER_11dBm);    //Set TX power to 11dBm (12.5 mW)
+
+  //---LCD---
   lcd1.hi2c = &hi2c1;
   lcd1.address = (0x27 << 1);
   lcd_init(&lcd1);
-  //HAL_Delay(100);
-
   lcd_gotoxy(&lcd1, 0, 0);
   lcd_puts(&lcd1, "LightTube");
 
 
-  awakePacket[0]=COMMON_ADDRESS;
-  awakePacket[2]=AWAKE_PACKET_MARK;
-  HAL_Delay(2000);
+  //HAL_Delay(5000);
+  //---Variables---
+  //awakePacket[0]=COMMON_ADDRESS;
+  //awakePacket[2]=AWAKE_PACKET_MARK;
+  //HAL_Delay(2000);
 
+  //---DMX receiving---
   //ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
-  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
-  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
 
 
+  uint8_t testPacket[6];
+  testPacket[0]=255;
+  testPacket[1]=0;
+  testPacket[2]=0;
+  testPacket[3]=0;
+  testPacket[4]=0;
+  testPacket[5]=0;
 
+  //HAL_Delay(2000);
+
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
+  //static uint8_t test[515];
+  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, test, 512);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  //ToDo: ASSIGN
+
   while (1)
   {
+
+	  //dmxPacketRdy=true;
+	  //dmxPacket[1]=255;
+	  //dmxPacket[2]=255;
+
 	  //lcd_gotoxy(&lcd1, 0, 1);
 	  //lcd_puts(&lcd1, "   ");
 	  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
-	  static uint32_t lastTick=0;
+	 /* static uint32_t lastTick=0;
 
 	  //---
 	    char buffer[16];  // buffer pro převod čísla na text
@@ -200,37 +282,49 @@ int main(void)
 	  //---
 
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
-
-//--------------ToDo: Do samostatné funkce void process_dmx(uint8_t *dmx_data) {
-	  if(dmxPacketRdy==1) //if packet ready
+*/
+	  //ToDo: Do solo souboru
+	  if(readyToTransmit==true&&dmxPacketRdy==true)
 	  {
-		  if(dmxRX[0]==DMX_STARTBYTE) //don't listen to messages that are not meant for you...
-		  {
-			  for(uint16_t i=currentAddress; i<NUM_OF_CHANNELS*activeGroups; i++)//list packets that are used for LightTubes
+		  readyToTransmit=false;
+		  memcpy(&testPacket[0], &dmxRX[3], 3);
+		  SI44_SendPacket(testPacket, sizeof(testPacket));
+		  dmxPacketRdy=false;
+	  }/*
+	  if(dmxPacketRdy==true&&readyToTransmit==true) //if DMX packet ready and RF not currently transmitting
+	  {
+		  //if(dmxPacket[0]==DMX_STARTBYTE) //don't listen to messages that are not meant for you...
+		  //{
+			  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_OF_CHANNELS*NUM_OF_RECEIVERS); i++)
 			  {
-				  if(dmxRX[i]!=dmxRX_prev[i])//if the packet changed
+				  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
 				  {
-					  for(uint8_t i=0; i<activeGroups; i++)
-					  {
-						  memcpy(&dataPacket[i][DATA_START_POS], &dmxRX[currentAddress+(NUM_OF_CHANNELS*i)], NUM_OF_CHANNELS); //copy them to according RX buffers
-						  nrf24_transmit(dataPacket[i], DATA_PACKET_LENGTH); //Sends only as many RF messages, as there are active receivers; but only MAX_RX_NUM
-						  //ToDo: Remove HAL_Delay from nrf library?
-						  //ToDo: Maybe add delay? If it doens't work - move it to timeToTransmit, make a flag, and add a delay
-					  }
+					  memcpy(&toSendPacket[0], &dmxPacket[currentDMXAddress], NUM_OF_CHANNELS*NUM_OF_RECEIVERS);
+					  SI44_SendPacket(toSendPacket, sizeof(toSendPacket));
 					  break;
 				  }
 			  }
 
-		  }
-		  dmxPacketRdy=0;
-	  }
+		  //}
+		  readyToTransmit=false;
+		  dmxPacketRdy=false;
+	  }/*
+	  for(uint8_t i=0; i<255;i++)
+	  {
+		  //testPacket[0]=testPacket[0]+30;
+		  SI44_SendPacket(testPacket, sizeof(testPacket));
+		  HAL_Delay(1000);
+
+	  }*/
+
+
 	  //if dmxPacketRdy -> rfPacketRdy
 	  //if rfPacketRdy -> odesli
 	  //if
 //--------------
 	  //Send RF packet to keep receivers awake
 	  //ToDo: set address function
-	  if(HAL_GetTick()-lastTick>AWAKE_PACKET_PERIOD)
+	  /*if(HAL_GetTick()-lastTick>AWAKE_PACKET_PERIOD)
 	  {
 		  for(uint8_t i=0; i<activeGroups; i++) //awake packet doesnt isnt multi dimensional array
 		  {
@@ -238,7 +332,7 @@ int main(void)
 			  nrf24_transmit(awakePacket, AWAKE_PACKET_LENGTH);
 		  }
 		  lastTick=HAL_GetTick();
-	  }
+	  }*/
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -403,16 +497,27 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPI2_GPIO_NSS_GPIO_Port, SPI2_GPIO_NSS_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : LED_Pin */
+  GPIO_InitStruct.Pin = LED_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SPI2_IRQ_Pin */
   GPIO_InitStruct.Pin = SPI2_IRQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(SPI2_IRQ_GPIO_Port, &GPIO_InitStruct);
 

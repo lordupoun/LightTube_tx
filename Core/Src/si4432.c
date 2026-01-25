@@ -127,7 +127,7 @@ void SI44_ClearRXFIFO(void)
     SI44_Write(SI44_REG_CTRL2, &a, 1);
 }
 
-void SI44_ReadPacket(uint8_t * buf)
+void SI44_ReadPacket(uint8_t * buf) //nemel by vracet delku?
 {
 	uint8_t length=0;
 	SI44_Read(SI44_RECEIVED_PACKET_LENGTH, &length, 1); //ToDo: Pokud length neni vetsi jak 64
@@ -135,7 +135,7 @@ void SI44_ReadPacket(uint8_t * buf)
 
 	SI44_ClearRXFIFO();
 
-	SI44_SetRXon(); //ToDo: const static?
+	SI44_SetRXon(); //ToDo: const static? odstranit
     //přečíst délku
 	//přečíst paket
 	//znovu zapnout RX //ToDo: optimalizovat pro spotřebu baterie
