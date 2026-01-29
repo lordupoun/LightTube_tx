@@ -141,6 +141,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         // Prisel BREAK (Framing Error) -> Restartujeme prijem
 
         HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
+        dmxPacketRdy=false;
         //dmxPacketRdy=true;
     }
 }
