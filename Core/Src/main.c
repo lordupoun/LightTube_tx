@@ -87,8 +87,8 @@ UART_HandleTypeDef huart1;
 static uint8_t dmxRX[514]; 			 	 //DMX receive buffer
 static uint8_t dmxPacket[513]; 	 //One received DMX packet
 static uint8_t dmxPrevPacket[513]; 	//One previously received DMX packet
-static bool dmxPacketRdy=false; 	     //Flag - dmxPacketReady
-static bool readyToTransmit=true;
+static volatile bool dmxPacketRdy=false; 	     //Flag - dmxPacketReady
+static volatile bool readyToTransmit=true;
 static uint16_t currentDMXAddress=1; 	 //Current address of the DMX receiver
 uint8_t toSendPacket[6];
 
@@ -97,7 +97,7 @@ static uint8_t dataPacket[MAX_RX_NUM][DATA_PACKET_LENGTH]; //RF transmit buffer;
 
 static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake packet; only one -> changes it's address in a for loop
 
-
+static volatile bool dmxCopied=false;
 
 /* USER CODE END PV */
 
@@ -139,7 +139,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     if (huart->Instance == USART1)
     {
         // Prisel BREAK (Framing Error) -> Restartujeme prijem
-
+    	HAL_UART_AbortReceive(&huart1);
         HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
         dmxPacketRdy=false;
         //dmxPacketRdy=true;
@@ -285,12 +285,34 @@ int main(void)
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 */
 	  //ToDo: Do solo souboru
-	  if(readyToTransmit==true&&dmxPacketRdy==true)
+	  if(dmxPacketRdy==true)
 	  {
-		  readyToTransmit=false;
-		  memcpy(&testPacket[0], &dmxRX[3], 3);
-		  SI44_SendPacket(testPacket, sizeof(testPacket));
+		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
+		  //__disable_irq();
+		  memcpy(&dmxPacket[0], &dmxRX[2], DMXPACKET_SIZE);
+		  //__enable_irq();
+		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_OF_CHANNELS*NUM_OF_RECEIVERS); i++)
+		  {
+			  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
+			  {
+				  dmxCopied=true;
+				  break;
+			  }
+		  }
+	  }
+	  if(readyToTransmit==true&&dmxCopied==true)
+	  {
 		  dmxPacketRdy=false;
+		  dmxCopied=false;
+		  readyToTransmit=false;
+
+		  memcpy(&testPacket[0], &dmxPacket[2], 3);
+		  SI44_SendPacket(testPacket, sizeof(testPacket));
+
+		  char uartBuf[50];
+		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[0], testPacket[1], testPacket[2]);
+		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+
 	  }/*
 	  if(dmxPacketRdy==true&&readyToTransmit==true) //if DMX packet ready and RF not currently transmitting
 	  {
