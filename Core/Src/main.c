@@ -129,7 +129,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 	//memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 	//memcpy(&dmxPacket[0], &dmxRX[1], DMXPACKET_SIZE);
 
-    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514); //DMXPACKET_SIZE
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513); //DMXPACKET_SIZE
     dmxPacketRdy=true;
     //dmxPacket[3]=255;
     //HAL_Delay(5000);
@@ -140,7 +140,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     {
         // Prisel BREAK (Framing Error) -> Restartujeme prijem
     	HAL_UART_AbortReceive(&huart1);
-        HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
+        HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
         dmxPacketRdy=false;
         //dmxPacketRdy=true;
     }
@@ -252,8 +252,8 @@ int main(void)
 
   //HAL_Delay(2000);
 
-  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
-  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 514);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
   //static uint8_t test[515];
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, test, 512);
   /* USER CODE END 2 */
@@ -289,9 +289,10 @@ int main(void)
 	  {
 		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 		  //__disable_irq();
-		  memcpy(&dmxPacket[0], &dmxRX[2], DMXPACKET_SIZE);
+		  memcpy(&dmxPacket[0], &dmxRX[0], DMXPACKET_SIZE);
 		  //__enable_irq();
 		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_OF_CHANNELS*NUM_OF_RECEIVERS); i++)
+		  //for(uint16_t i=0; i<6; i++)
 		  {
 			  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
 			  {
@@ -306,7 +307,7 @@ int main(void)
 		  dmxCopied=false;
 		  readyToTransmit=false;
 
-		  memcpy(&testPacket[0], &dmxPacket[2], 3);
+		  memcpy(&testPacket[0], &dmxPacket[1], 3);
 		  SI44_SendPacket(testPacket, sizeof(testPacket));
 
 		  char uartBuf[50];
