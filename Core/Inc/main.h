@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2025 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -59,11 +59,37 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED_Pin GPIO_PIN_13
 #define LED_GPIO_Port GPIOC
-#define SPI2_IRQ_Pin GPIO_PIN_11
-#define SPI2_IRQ_GPIO_Port GPIOB
-#define SPI2_IRQ_EXTI_IRQn EXTI15_10_IRQn
+#define BT_TX_Pin GPIO_PIN_2
+#define BT_TX_GPIO_Port GPIOA
+#define BT_RX_Pin GPIO_PIN_3
+#define BT_RX_GPIO_Port GPIOA
+#define BT_EN_Pin GPIO_PIN_4
+#define BT_EN_GPIO_Port GPIOA
+#define BT_STATE_Pin GPIO_PIN_5
+#define BT_STATE_GPIO_Port GPIOA
+#define USB_TX_Pin GPIO_PIN_10
+#define USB_TX_GPIO_Port GPIOB
+#define USB_RX_Pin GPIO_PIN_11
+#define USB_RX_GPIO_Port GPIOB
 #define SPI2_GPIO_NSS_Pin GPIO_PIN_12
 #define SPI2_GPIO_NSS_GPIO_Port GPIOB
+#define SPI2_IRQ_Pin GPIO_PIN_8
+#define SPI2_IRQ_GPIO_Port GPIOA
+#define SPI2_IRQ_EXTI_IRQn EXTI9_5_IRQn
+#define DMX_TX_Pin GPIO_PIN_9
+#define DMX_TX_GPIO_Port GPIOA
+#define DMX_RX_Pin GPIO_PIN_10
+#define DMX_RX_GPIO_Port GPIOA
+#define SPI2_GPIO_ShutDN_Pin GPIO_PIN_11
+#define SPI2_GPIO_ShutDN_GPIO_Port GPIOA
+#define BTN1_UP_Pin GPIO_PIN_12
+#define BTN1_UP_GPIO_Port GPIOA
+#define BTN2_LEFT_Pin GPIO_PIN_15
+#define BTN2_LEFT_GPIO_Port GPIOA
+#define BTN3_RIGHT_Pin GPIO_PIN_3
+#define BTN3_RIGHT_GPIO_Port GPIOB
+#define BTN4_DOWN_Pin GPIO_PIN_4
+#define BTN4_DOWN_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

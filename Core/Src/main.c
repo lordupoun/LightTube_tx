@@ -80,6 +80,8 @@ I2C_HandleTypeDef hi2c1;
 SPI_HandleTypeDef hspi2;
 
 UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 //ToDo: Rozmístit do samostatných souborů DMX a RF
@@ -104,9 +106,11 @@ static volatile bool dmxCopied=false;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_USART1_UART_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
+static void MX_USART1_UART_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -134,22 +138,21 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
     //dmxPacket[3]=255;
     //HAL_Delay(5000);
 }
+//---DMX receiving failed Callback---
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
-        // Prisel BREAK (Framing Error) -> Restartujeme prijem
     	HAL_UART_AbortReceive(&huart1);
         HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
         dmxPacketRdy=false;
-        //dmxPacketRdy=true;
     }
 }
 //---RF EXTI Callback---
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	//EXTI for RF module (SI4432)
-	if (GPIO_Pin == GPIO_PIN_11)
+	if (GPIO_Pin == GPIO_PIN_8)
 	{
     	uint8_t b; //jen pro reset 0x03 registru
     	SI44_Read(0x04, &b, 1);
@@ -206,14 +209,17 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART1_UART_Init();
   MX_I2C1_Init();
   MX_SPI2_Init();
+  MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
 
   //---Initialize:---
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
 
   //---SI4432--- //musi byt pred SI, jinak se buguje jako krava
   SI44_Init(&hspi2, GPIOB, GPIO_PIN_12);
@@ -230,6 +236,8 @@ int main(void)
   lcd_init(&lcd1);
   lcd_gotoxy(&lcd1, 0, 0);
   lcd_puts(&lcd1, "LightTube");
+  lcd_gotoxy(&lcd1, 4, 1);
+  lcd_puts(&lcd1, "TEST MODE");
 
 
   //HAL_Delay(5000);
@@ -242,13 +250,14 @@ int main(void)
   //ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
 
 
-  uint8_t testPacket[6];
+  uint8_t testPacket[7];
   testPacket[0]=255;
-  testPacket[1]=0;
-  testPacket[2]=0;
-  testPacket[3]=0;
-  testPacket[4]=0;
+  testPacket[1]=11;
+  testPacket[2]=22;
+  testPacket[3]=33;
+  testPacket[4]=44;
   testPacket[5]=0;
+  testPacket[6]=0;
 
   //HAL_Delay(2000);
 
@@ -263,7 +272,7 @@ int main(void)
 
   while (1)
   {
-
+	  //SI44_SendPacket(testPacket, sizeof(testPacket));
 	  //dmxPacketRdy=true;
 	  //dmxPacket[1]=255;
 	  //dmxPacket[2]=255;
@@ -284,8 +293,8 @@ int main(void)
 
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 */
-	  //ToDo: Do solo souboru
-	  if(dmxPacketRdy==true)
+	  //ToDo: Do solo souboru------------------------------------------------------------------------------------
+	  /*if(dmxPacketRdy==true)
 	  {
 		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 		  //__disable_irq();
@@ -307,14 +316,26 @@ int main(void)
 		  dmxCopied=false;
 		  readyToTransmit=false;
 
-		  memcpy(&testPacket[0], &dmxPacket[1], 3);
+		  memcpy(&testPacket[1], &dmxPacket[1], 6);
 		  SI44_SendPacket(testPacket, sizeof(testPacket));
 
 		  char uartBuf[50];
-		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[0], testPacket[1], testPacket[2]);
+		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
 		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
 
-	  }/*
+	  }*/ //-------------------------------------------------------------------------------------------
+	  SI44_SendPacket(testPacket, sizeof(testPacket));
+
+	  char uartBuf[50];
+	  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
+	  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+	  HAL_Delay(1000);
+	  //char uartBuf[50];
+	 // int len = sprintf(uartBuf, "%d %d %d\r\n", dmxRX[1], dmxRX[2], testPacket[3]);
+	  //HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+	  //HAL_Delay(1000);
+	  /*
+
 	  if(dmxPacketRdy==true&&readyToTransmit==true) //if DMX packet ready and RF not currently transmitting
 	  {
 		  //if(dmxPacket[0]==DMX_STARTBYTE) //don't listen to messages that are not meant for you...
@@ -509,6 +530,72 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 36400;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * @brief USART3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART3_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART3_Init 0 */
+
+  /* USER CODE END USART3_Init 0 */
+
+  /* USER CODE BEGIN USART3_Init 1 */
+
+  /* USER CODE END USART3_Init 1 */
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 250000;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_2;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART3_Init 2 */
+
+  /* USER CODE END USART3_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -523,11 +610,14 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, BT_EN_Pin|SPI2_GPIO_ShutDN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPI2_GPIO_NSS_GPIO_Port, SPI2_GPIO_NSS_Pin, GPIO_PIN_RESET);
@@ -539,11 +629,18 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SPI2_IRQ_Pin */
-  GPIO_InitStruct.Pin = SPI2_IRQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  /*Configure GPIO pins : BT_EN_Pin SPI2_GPIO_ShutDN_Pin */
+  GPIO_InitStruct.Pin = BT_EN_Pin|SPI2_GPIO_ShutDN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(SPI2_IRQ_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BT_STATE_Pin BTN1_UP_Pin BTN2_LEFT_Pin */
+  GPIO_InitStruct.Pin = BT_STATE_Pin|BTN1_UP_Pin|BTN2_LEFT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SPI2_GPIO_NSS_Pin */
   GPIO_InitStruct.Pin = SPI2_GPIO_NSS_Pin;
@@ -552,9 +649,21 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
   HAL_GPIO_Init(SPI2_GPIO_NSS_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : SPI2_IRQ_Pin */
+  GPIO_InitStruct.Pin = SPI2_IRQ_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(SPI2_IRQ_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BTN3_RIGHT_Pin BTN4_DOWN_Pin */
+  GPIO_InitStruct.Pin = BTN3_RIGHT_Pin|BTN4_DOWN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
