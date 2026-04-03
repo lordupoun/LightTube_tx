@@ -228,7 +228,7 @@ int main(void)
   SI44_SetAGCMode(0b00100000); //6th bit - sgin
   SI44_SetInterrupts1(0b00000100); //1st bit = CRC error
   SI44_SetInterrupts2(0b00000000);
-  SI44_SetTXPower(SI44_TX_POWER_11dBm);    //Set TX power to 11dBm (12.5 mW)
+  SI44_SetTXPower(SI44_TX_POWER_20dBm);    //Set TX power to 11dBm (12.5 mW)
 
   //---LCD---
   lcd1.hi2c = &hi2c1;
@@ -272,6 +272,21 @@ int main(void)
 
   while (1)
   {
+	  testPacket[1]=255;
+	  testPacket[2]=0;
+	  testPacket[3]=0;
+	  SI44_SendPacket(testPacket, sizeof(testPacket));
+	  HAL_Delay(1000);
+	  testPacket[1]=0;
+	  testPacket[2]=255;
+	  testPacket[3]=0;
+	  SI44_SendPacket(testPacket, sizeof(testPacket));
+	  HAL_Delay(1000);
+	  testPacket[1]=0;
+	  testPacket[2]=0;
+	  testPacket[3]=255;
+	  SI44_SendPacket(testPacket, sizeof(testPacket));
+	  HAL_Delay(1000);
 	  //SI44_SendPacket(testPacket, sizeof(testPacket));
 	  //dmxPacketRdy=true;
 	  //dmxPacket[1]=255;
@@ -294,7 +309,8 @@ int main(void)
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 */
 	  //ToDo: Do solo souboru------------------------------------------------------------------------------------
-	  /*if(dmxPacketRdy==true)
+	  /* ---...
+	  if(dmxPacketRdy==true)
 	  {
 		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 		  //__disable_irq();
@@ -322,14 +338,43 @@ int main(void)
 		  char uartBuf[50];
 		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
 		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)uartBuf, len);
 
-	  }*/ //-------------------------------------------------------------------------------------------
-	  SI44_SendPacket(testPacket, sizeof(testPacket));
+	  }
+
+	 //-------------------------------------------------------------------------------------------
+	  if(HAL_GPIO_ReadPin(BTN1_UP_GPIO_Port, BTN1_UP_Pin) == GPIO_PIN_RESET)
+	  {
+		  lcd_gotoxy(&lcd1, 0, 0);
+		  lcd_puts(&lcd1, "NahoruTest");
+	  }
+	  if(HAL_GPIO_ReadPin(BTN2_LEFT_GPIO_Port, BTN2_LEFT_Pin) == GPIO_PIN_RESET)
+	  {
+		  lcd_gotoxy(&lcd1, 0, 0);
+		  lcd_puts(&lcd1, "DolevaTest");
+		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
+	  }
+	  if(HAL_GPIO_ReadPin(BTN3_RIGHT_GPIO_Port, BTN3_RIGHT_Pin) == GPIO_PIN_RESET)
+	  {
+	  	  lcd_gotoxy(&lcd1, 0, 0);
+	  	  lcd_puts(&lcd1, "DopravaTest");
+	  	//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
+	  }
+	  if(HAL_GPIO_ReadPin(BTN4_DOWN_GPIO_Port, BTN4_DOWN_Pin) == GPIO_PIN_RESET)
+	  {
+	  	  lcd_gotoxy(&lcd1, 0, 0);
+	  	  lcd_puts(&lcd1, "DoluTest");
+	  	//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
+	  }
+	*///---...
+	  /*SI44_SendPacket(testPacket, sizeof(testPacket));
 
 	  char uartBuf[50];
 	  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
 	  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
-	  HAL_Delay(1000);
+	  HAL_Delay(1000);*/
+
+
 	  //char uartBuf[50];
 	 // int len = sprintf(uartBuf, "%d %d %d\r\n", dmxRX[1], dmxRX[2], testPacket[3]);
 	  //HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
@@ -645,7 +690,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : SPI2_GPIO_NSS_Pin */
   GPIO_InitStruct.Pin = SPI2_GPIO_NSS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
   HAL_GPIO_Init(SPI2_GPIO_NSS_GPIO_Port, &GPIO_InitStruct);
 
