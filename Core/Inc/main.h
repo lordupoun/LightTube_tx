@@ -67,10 +67,6 @@ void Error_Handler(void);
 #define BT_EN_GPIO_Port GPIOA
 #define BT_STATE_Pin GPIO_PIN_5
 #define BT_STATE_GPIO_Port GPIOA
-#define USB_TX_Pin GPIO_PIN_10
-#define USB_TX_GPIO_Port GPIOB
-#define USB_RX_Pin GPIO_PIN_11
-#define USB_RX_GPIO_Port GPIOB
 #define SPI2_GPIO_NSS_Pin GPIO_PIN_12
 #define SPI2_GPIO_NSS_GPIO_Port GPIOB
 #define SPI2_IRQ_Pin GPIO_PIN_8

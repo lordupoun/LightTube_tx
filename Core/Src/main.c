@@ -81,7 +81,6 @@ SPI_HandleTypeDef hspi2;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
-UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 //ToDo: Rozmístit do samostatných souborů DMX a RF
@@ -110,7 +109,6 @@ static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -132,9 +130,9 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
 	//memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 	//memcpy(&dmxPacket[0], &dmxRX[1], DMXPACKET_SIZE);
-
+	dmxPacketRdy=true;
     HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513); //DMXPACKET_SIZE
-    dmxPacketRdy=true;
+
     //dmxPacket[3]=255;
     //HAL_Delay(5000);
 }
@@ -143,20 +141,17 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
+    	dmxPacketRdy=false;
     	HAL_UART_AbortReceive(&huart1);
         HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
-        dmxPacketRdy=false;
     }
 }
 //---RF EXTI Callback---
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	//EXTI for RF module (SI4432)
-	if (GPIO_Pin == GPIO_PIN_8)
-	{
-    	uint8_t b; //jen pro reset 0x03 registru
-    	SI44_Read(0x04, &b, 1);
-        SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
+	//if (GPIO_Pin == GPIO_PIN_8)
+	//{
         readyToTransmit=true;
 
         //What caused the interrupt?
@@ -169,7 +164,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 				//rxDoneFlag=true; - in case of receiving
 				break;
 		}*/
-	}
+	//}
 }
 /* USER CODE END 0 */
 
@@ -213,7 +208,6 @@ int main(void)
   MX_SPI2_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
-  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
@@ -225,10 +219,14 @@ int main(void)
   SI44_Init(&hspi2, GPIOB, GPIO_PIN_12);
   HAL_Delay(500); //ToDo: zkratit
   SI44_PresetConfig();
-  SI44_SetAGCMode(0b00100000); //6th bit - sgin
+  HAL_Delay(5000);
+  //SI44_SetAGCMode(0b00100000); //6th bit - sgin
   SI44_SetInterrupts1(0b00000100); //1st bit = CRC error
+  HAL_Delay(10);
   SI44_SetInterrupts2(0b00000000);
+  HAL_Delay(10);
   SI44_SetTXPower(SI44_TX_POWER_20dBm);    //Set TX power to 11dBm (12.5 mW)
+  HAL_Delay(10);
 
   //---LCD---
   lcd1.hi2c = &hi2c1;
@@ -272,21 +270,24 @@ int main(void)
 
   while (1)
   {
-	  testPacket[1]=255;
+	  /*char uartBuf[50];
+	  int len = sprintf(uartBuf, "%d %d %d\r\n", dmxRX[1], dmxRX[2], dmxRX[3]);
+	  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);*/
+	  /*testPacket[1]=255;
 	  testPacket[2]=0;
-	  testPacket[3]=0;
+	  testPacket[3]=255;
 	  SI44_SendPacket(testPacket, sizeof(testPacket));
 	  HAL_Delay(1000);
-	  testPacket[1]=0;
+	  testPacket[1]=255;
 	  testPacket[2]=255;
 	  testPacket[3]=0;
 	  SI44_SendPacket(testPacket, sizeof(testPacket));
 	  HAL_Delay(1000);
 	  testPacket[1]=0;
-	  testPacket[2]=0;
+	  testPacket[2]=255;
 	  testPacket[3]=255;
 	  SI44_SendPacket(testPacket, sizeof(testPacket));
-	  HAL_Delay(1000);
+	  HAL_Delay(1000);*/
 	  //SI44_SendPacket(testPacket, sizeof(testPacket));
 	  //dmxPacketRdy=true;
 	  //dmxPacket[1]=255;
@@ -309,7 +310,8 @@ int main(void)
 	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
 */
 	  //ToDo: Do solo souboru------------------------------------------------------------------------------------
-	  /* ---...
+	  //ToDo: Prohazovat kam se ukládá
+	  // ---...
 	  if(dmxPacketRdy==true)
 	  {
 		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
@@ -326,19 +328,23 @@ int main(void)
 			  }
 		  }
 	  }
-	  if(readyToTransmit==true&&dmxCopied==true)
+	  if(dmxCopied==true) //readyToTransmit==true&&
 	  {
+	    uint8_t b; //jen pro reset 0x03 registru
+	    SI44_Read(0x04, &b, 1);
+	    SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
+
 		  dmxPacketRdy=false;
 		  dmxCopied=false;
 		  readyToTransmit=false;
 
-		  memcpy(&testPacket[1], &dmxPacket[1], 6);
+		  memcpy(&testPacket[0], &dmxPacket[1], 6);
 		  SI44_SendPacket(testPacket, sizeof(testPacket));
 
 		  char uartBuf[50];
 		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
 		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
-		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)uartBuf, len);
+		  //HAL_UART_Transmit_IT(&huart3, (uint8_t*)uartBuf, len);
 
 	  }
 
@@ -366,7 +372,7 @@ int main(void)
 	  	  lcd_puts(&lcd1, "DoluTest");
 	  	//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
 	  }
-	*///---...
+	//---...
 	  /*SI44_SendPacket(testPacket, sizeof(testPacket));
 
 	  char uartBuf[50];
@@ -608,39 +614,6 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART3_Init 0 */
-
-  /* USER CODE END USART3_Init 0 */
-
-  /* USER CODE BEGIN USART3_Init 1 */
-
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 250000;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_2;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART3_Init 2 */
-
-  /* USER CODE END USART3_Init 2 */
-
-}
-
-/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -696,7 +669,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : SPI2_IRQ_Pin */
   GPIO_InitStruct.Pin = SPI2_IRQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(SPI2_IRQ_GPIO_Port, &GPIO_InitStruct);
 
