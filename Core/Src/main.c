@@ -79,6 +79,9 @@ I2C_HandleTypeDef hi2c1;
 
 SPI_HandleTypeDef hspi2;
 
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
@@ -100,6 +103,10 @@ static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake pa
 
 static volatile bool dmxCopied=false;
 
+static volatile bool checkPacketRdy=0;
+
+static volatile bool signalLostDMX=0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -109,13 +116,25 @@ static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM2)
+    {
+    	checkPacketRdy=1;
+    }
+    if (htim->Instance == TIM3)
+    {
+    	signalLostDMX=1;
+    }
+}
 
 void addAdressToPacket(void) //adds address into the header
 {
@@ -166,6 +185,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		}*/
 	//}
 }
+
+void reset_timer(TIM_HandleTypeDef *htim)
+{
+	__HAL_TIM_SET_COUNTER(htim, 0);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -208,6 +233,8 @@ int main(void)
   MX_SPI2_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
@@ -248,16 +275,21 @@ int main(void)
   //ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
 
 
-  uint8_t testPacket[7];
-  testPacket[0]=255;
-  testPacket[1]=11;
+  uint8_t testPacket[8];
+  testPacket[0]=0xAA;
+  testPacket[1]=0;
   testPacket[2]=22;
   testPacket[3]=33;
   testPacket[4]=44;
   testPacket[5]=0;
   testPacket[6]=0;
+  uint8_t checkPacket[2];
+  checkPacket[0]=0xBB;
+  checkPacket[1]=0;
 
   //HAL_Delay(2000);
+  HAL_TIM_Base_Start_IT(&htim2);
+  HAL_TIM_Base_Start_IT(&htim3);
 
   HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
   HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
@@ -314,6 +346,8 @@ int main(void)
 	  // ---...
 	  if(dmxPacketRdy==true)
 	  {
+		  dmxPacketRdy=false;
+		  reset_timer(&htim3);
 		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 		  //__disable_irq();
 		  memcpy(&dmxPacket[0], &dmxRX[0], DMXPACKET_SIZE);
@@ -327,25 +361,56 @@ int main(void)
 				  break;
 			  }
 		  }
+		  char uartBuf[50];
+		  int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
+		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
 	  }
-	  if(dmxCopied==true) //readyToTransmit==true&&
+	  if(readyToTransmit==true&&dmxCopied==true) //readyToTransmit==true&&
 	  {
 	    uint8_t b; //jen pro reset 0x03 registru
 	    SI44_Read(0x04, &b, 1);
 	    SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
 
-		  dmxPacketRdy=false;
-		  dmxCopied=false;
-		  readyToTransmit=false;
 
-		  memcpy(&testPacket[0], &dmxPacket[1], 6);
+	    checkPacket[1]+=1;
+	    testPacket[1]=checkPacket[1];
+
+		  dmxCopied=false;
+
+
+		  memcpy(&testPacket[2], &dmxPacket[1], 8);
 		  SI44_SendPacket(testPacket, sizeof(testPacket));
 
 		  char uartBuf[50];
 		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
 		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+		  readyToTransmit=false;
 		  //HAL_UART_Transmit_IT(&huart3, (uint8_t*)uartBuf, len);
 
+	  }
+	  if(readyToTransmit==true&&checkPacketRdy==1)
+	  {
+		  checkPacketRdy=0;
+		  uint8_t b; //jen pro reset 0x03 registru
+		  SI44_Read(0x04, &b, 1);
+		  SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
+
+
+		  SI44_SendPacket(checkPacket, sizeof(checkPacket));
+		  readyToTransmit=false;
+	  }
+	  if(readyToTransmit==true&&signalLostDMX==1)
+	  {
+		  signalLostDMX=0;
+		  checkPacket[1]+=1;
+		  testPacket[1]=checkPacket[1];
+		  testPacket[2]=0;
+		  testPacket[3]=0;
+		  testPacket[4]=0;
+		  testPacket[5]=0;
+		  testPacket[6]=0;
+		  testPacket[7]=0;
+		  SI44_SendPacket(testPacket, sizeof(testPacket));
 	  }
 
 	 //-------------------------------------------------------------------------------------------
@@ -548,6 +613,96 @@ static void MX_SPI2_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 7199;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 9999;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 7199;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 29999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -669,7 +824,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : SPI2_IRQ_Pin */
   GPIO_InitStruct.Pin = SPI2_IRQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(SPI2_IRQ_GPIO_Port, &GPIO_InitStruct);
 
