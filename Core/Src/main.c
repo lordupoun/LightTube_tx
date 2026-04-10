@@ -92,6 +92,7 @@ static uint8_t dmxRX[514]; 			 	 //DMX receive buffer
 static uint8_t dmxPacket[513]; 	 //One received DMX packet
 static uint8_t dmxPrevPacket[513]; 	//One previously received DMX packet
 static volatile bool dmxPacketRdy=false; 	     //Flag - dmxPacketReady
+static volatile bool btPacketRdy=false; 	     //Flag - dmxPacketReady
 static volatile bool readyToTransmit=true;
 static uint16_t currentDMXAddress=1; 	 //Current address of the DMX receiver
 uint8_t toSendPacket[6];
@@ -126,11 +127,11 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN 0 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM2)
+    if (htim->Instance == TIM2) //Timer for sending checkPackets (to keep devices informed about the presence of RF signal)
     {
     	checkPacketRdy=1;
     }
-    if (htim->Instance == TIM3)
+    if (htim->Instance == TIM3) //Checks if DMX signal is present
     {
     	signalLostDMX=1;
     }
@@ -149,9 +150,16 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
 	//memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
 	//memcpy(&dmxPacket[0], &dmxRX[1], DMXPACKET_SIZE);
-	dmxPacketRdy=true;
-    HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513); //DMXPACKET_SIZE
-
+	if(huart->Instance==USART1)
+	{
+		dmxPacketRdy=true;
+		HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513); //DMXPACKET_SIZE
+	}
+	else if (huart->Instance==USART2)
+	{
+		btPacketRdy=true;
+		HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6); //DMXPACKET_SIZE
+	}
     //dmxPacket[3]=255;
     //HAL_Delay(5000);
 }
@@ -163,6 +171,12 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     	dmxPacketRdy=false;
     	HAL_UART_AbortReceive(&huart1);
         HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+    }
+    else if (huart->Instance == USART2)
+    {
+    	btPacketRdy=false;
+    	HAL_UART_AbortReceive(&huart2);
+        HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6);
     }
 }
 //---RF EXTI Callback---
@@ -184,6 +198,61 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 				break;
 		}*/
 	//}
+}
+void dmx_activate()
+{
+	HAL_UART_AbortReceive(&huart2);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+	HAL_TIM_Base_Start_IT(&htim3);
+}
+void bluetooth_activate()
+{
+	HAL_TIM_Base_Stop_IT(&htim3);
+	HAL_UART_AbortReceive(&huart1);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6);
+}
+
+void bluetooth_at_commands()
+{
+	/*HAL_UART_Abort(&huart2);
+	HAL_UART_DeInit(&huart2); //REMOVE COMMENTS IF CHANGING BAUD RATE (default AT=38400kbps)
+	huart2.Init.BaudRate = 9600;
+	if (HAL_UART_Init(&huart2) != HAL_OK)
+	{
+	    //inicializace neuspesna -> LCD
+	}
+	else
+	{
+		//inicializace uspesna
+	}*/
+	HAL_GPIO_WritePin(BT_EN_GPIO_Port, BT_EN_Pin, GPIO_PIN_SET);
+	HAL_Delay(1000);
+	//HAL_UART_Transmit(&huart2, "AT\r\n", strlen("AT\r\n"), 100);
+	HAL_Delay(500);
+	HAL_UART_Transmit(&huart2, "AT+NAME=LightTube\r\n", strlen("AT+NAME=LightTube\r\n"), 100);
+	HAL_Delay(500);
+	HAL_UART_Transmit(&huart2, "AT+CLASS=0x0\r\n", strlen("AT+CLASS=0x0\r\n"), 100);
+	HAL_Delay(500);
+	HAL_UART_Transmit(&huart2, "AT+UART=38400,0,0\r\n", strlen("AT+UART=38400,0,0\r\n"), 100);
+	HAL_Delay(500);
+	HAL_UART_Transmit(&huart2, "AT+PSWD=8182\r\n", strlen("AT+PSWD=8182\r\n"), 100);
+	HAL_Delay(1000);
+	HAL_GPIO_WritePin(BT_EN_GPIO_Port, BT_EN_Pin, GPIO_PIN_RESET);
+	lcd_puts(&lcd1, "DONE");
+	/*HAL_Delay(1000);
+	HAL_UART_DeInit(&huart2);
+	huart2.Init.BaudRate = 38400;
+	if (HAL_UART_Init(&huart2) != HAL_OK)
+	{
+	    //inicializace neuspesna -> LCD
+	}
+	else
+	{
+		//inicializace uspesna
+	}*/
+
 }
 
 void reset_timer(TIM_HandleTypeDef *htim)
@@ -259,10 +328,13 @@ int main(void)
   lcd1.hi2c = &hi2c1;
   lcd1.address = (0x27 << 1);
   lcd_init(&lcd1);
+  HAL_Delay(100);
   lcd_gotoxy(&lcd1, 0, 0);
   lcd_puts(&lcd1, "LightTube");
   lcd_gotoxy(&lcd1, 4, 1);
   lcd_puts(&lcd1, "TEST MODE");
+
+  //bluetooth_at_commands();
 
 
   //HAL_Delay(5000);
@@ -289,10 +361,9 @@ int main(void)
 
   //HAL_Delay(2000);
   HAL_TIM_Base_Start_IT(&htim2);
-  HAL_TIM_Base_Start_IT(&htim3);
 
-  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
-  HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+
+  dmx_activate();
   //static uint8_t test[515];
   //HAL_UARTEx_ReceiveToIdle_IT(&huart1, test, 512);
   /* USER CODE END 2 */
@@ -349,7 +420,7 @@ int main(void)
 		  dmxPacketRdy=false;
 		  reset_timer(&htim3);
 		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
-		  //__disable_irq();
+		  //__disable_irq(); //The packet shouldn't be rewritten by DMX_IT while copying
 		  memcpy(&dmxPacket[0], &dmxRX[0], DMXPACKET_SIZE);
 		  //__enable_irq();
 		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_OF_CHANNELS*NUM_OF_RECEIVERS); i++)
@@ -361,6 +432,15 @@ int main(void)
 				  break;
 			  }
 		  }
+		  char uartBuf[50];
+		  int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
+		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+	  }
+	  if(btPacketRdy==true)
+	  {
+		  btPacketRdy=false;
+		  memcpy(&dmxPacket[1], &dmxRX[0], 6);
+		  dmxCopied=true;
 		  char uartBuf[50];
 		  int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
 		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
@@ -416,8 +496,10 @@ int main(void)
 	 //-------------------------------------------------------------------------------------------
 	  if(HAL_GPIO_ReadPin(BTN1_UP_GPIO_Port, BTN1_UP_Pin) == GPIO_PIN_RESET)
 	  {
+		  lcd_clear(&lcd1);
 		  lcd_gotoxy(&lcd1, 0, 0);
-		  lcd_puts(&lcd1, "NahoruTest");
+		  lcd_puts(&lcd1, "MODE: UART");
+		  dmx_activate();
 	  }
 	  if(HAL_GPIO_ReadPin(BTN2_LEFT_GPIO_Port, BTN2_LEFT_Pin) == GPIO_PIN_RESET)
 	  {
@@ -433,9 +515,10 @@ int main(void)
 	  }
 	  if(HAL_GPIO_ReadPin(BTN4_DOWN_GPIO_Port, BTN4_DOWN_Pin) == GPIO_PIN_RESET)
 	  {
-	  	  lcd_gotoxy(&lcd1, 0, 0);
-	  	  lcd_puts(&lcd1, "DoluTest");
-	  	//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
+		  lcd_clear(&lcd1);
+		  lcd_gotoxy(&lcd1, 0, 0);
+		  lcd_puts(&lcd1, "MODE: BLUETOOTH");
+		  bluetooth_activate();
 	  }
 	//---...
 	  /*SI44_SendPacket(testPacket, sizeof(testPacket));
@@ -751,7 +834,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 36400;
+  huart2.Init.BaudRate = 38400;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
