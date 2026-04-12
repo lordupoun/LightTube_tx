@@ -38,32 +38,15 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-//RX defines
-//RX packet: 0-DeviceHW_Number (from DIP switch); 1-DeviceSW_Number (Address); 2-MessageType (DATA,MOD,AWAKE); 3-data
-//Device HW_NUMBER: 0-not used; 1-DIP SWITCH; 2-DIP SWITCH; 3-DIP SWITCH; ...
-//Device SW_NUMBER: assigned by transmitter for more effective transmission: 0-not used; 1;2;3;4;5;...
-//MOD: Address,
-
-#define COMMON_ADDRESS 0x00
-#define MAX_RX_NUM 6 //maximum number of transmit groups for lights
-
-#define NUM_OF_CHANNELS   6   //num of data bytes -> channels used by one receiver
-#define NUM_OF_RECEIVERS  1
-
-#define DATA_PACKET_LENGTH 12 //payload size; 64 = max for SI4432; //ToDo: HEADER_SIZE+NUM_OF_CHANNELS
 #define DATA_PACKET_MARK 0xAA
-#define DATA_HEADER_SIZE 6    //num of bytes for header
-#define DATA_START_POS 3 //Position of packet on which DMX data starts
+#define DATA_MAX_PACKET_SIZE 33
 
-#define MOD_PACKET_LENGTH 5
-#define MOD_ADDRESS_MARK 0xCC
-
-#define AWAKE_PACKET_LENGTH 3
-#define AWAKE_PACKET_PERIOD 20 //20ms by default
-#define AWAKE_PACKET_MARK 0xFF
+#define AWAKE_PACKET_MARK 0xBB
+#define AWAKE_PACKET_SIZE 2
+//AWAKE_PACKET_PERIOD is defined by TIM3; 750ms by default
 
 //DMX defines
-#define DMXPACKET_SIZE 513 //do not change
+#define DMX_PACKET_SIZE 513 //do not change
 #define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
 
 I2C_LCD_HandleTypeDef lcd1;
@@ -87,26 +70,28 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 //ToDo: Rozmístit do samostatných souborů DMX a RF
+//ToDo: do mainu jako static
 
-static uint8_t dmxRX[514]; 			 	 //DMX receive buffer
-static uint8_t dmxPacket[513]; 	 //One received DMX packet
-static uint8_t dmxPrevPacket[513]; 	//One previously received DMX packet
-static volatile bool dmxPacketRdy=false; 	     //Flag - dmxPacketReady
-static volatile bool btPacketRdy=false; 	     //Flag - dmxPacketReady
-static volatile bool readyToTransmit=true;
-static uint16_t currentDMXAddress=1; 	 //Current address of the DMX receiver
-uint8_t toSendPacket[6];
+//GLOBAL VARIABLES
+static uint8_t dataPacketSize = 8;		 //Current size of RF data packet
+static uint8_t numOfReceivers = 1;		 //Number of receivers = number of uniquely addressable tubes (if 1, all share the same data)
+static uint16_t currentDMXAddress=1; 	 	 //Current address of the DMX receiver
+static uint8_t awakePacketID = 0;		 //ID of awake packet = the same as an ID of the last data packet
 
+static uint8_t rxBuff[DMX_PACKET_SIZE+1]; 	    //receive buffer for both DMX and bluetooth
+static uint8_t dmxPacket[DMX_PACKET_SIZE]; 		//One received DMX packet
+static uint8_t dmxPrevPacket[DMX_PACKET_SIZE]; 	//One previously received DMX packet
+static uint8_t txBuff[DATA_MAX_PACKET_SIZE];		//Buffer for RF TX
 
-static uint8_t dataPacket[MAX_RX_NUM][DATA_PACKET_LENGTH]; //RF transmit buffer; ToDo: Rename to dataPacket
+//the rest of variables is in main
 
-static uint8_t awakePacket[AWAKE_PACKET_LENGTH]; //RF transmit buffer - awake packet; only one -> changes it's address in a for loop
-
-static volatile bool dmxCopied=false;
-
-static volatile bool checkPacketRdy=0;
-
-static volatile bool signalLostDMX=0;
+//FLAGS:
+static volatile bool dmxPacketRdy=false;   //DMX packet prepared for parsing
+static volatile bool btPacketRdy=false;    //BT packet prepared for parsing
+static volatile bool readyToTransmit=true; //Si4432 has finished previous transmission
+static volatile bool dmxCopied=false;	   //DMX / BT packet is parsed
+static volatile bool awakePacketRdy=0;	   //Time to send awake packet if 1
+static volatile bool signalLostDMX=0;	   //Signal lost  if 1
 
 /* USER CODE END PV */
 
@@ -127,41 +112,32 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN 0 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM2) //Timer for sending checkPackets (to keep devices informed about the presence of RF signal)
+	//Timer for sending awakePackets (to keep devices informed about the presence of RF signal)
+    if (htim->Instance == TIM2)
     {
-    	checkPacketRdy=1;
+    	awakePacketRdy=1;
     }
-    if (htim->Instance == TIM3) //Checks if DMX signal is present
+    //Checks if DMX signal is present
+    if (htim->Instance == TIM3)
     {
     	signalLostDMX=1;
     }
 }
 
-void addAdressToPacket(void) //adds address into the header
-{
-	for(uint8_t i=0; i<MAX_RX_NUM; i++)
-	{
-		dataPacket[i][0]=i+1;
-	}
-}
 
 //---DMX receiving Callback---
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
-	//memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
-	//memcpy(&dmxPacket[0], &dmxRX[1], DMXPACKET_SIZE);
 	if(huart->Instance==USART1)
 	{
 		dmxPacketRdy=true;
-		HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513); //DMXPACKET_SIZE
+		HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE); //Should be outside of NVIC callback
 	}
 	else if (huart->Instance==USART2)
 	{
 		btPacketRdy=true;
-		HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6); //DMXPACKET_SIZE
+		HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
 	}
-    //dmxPacket[3]=255;
-    //HAL_Delay(5000);
 }
 //---DMX receiving failed Callback---
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -170,18 +146,19 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     {
     	dmxPacketRdy=false;
     	HAL_UART_AbortReceive(&huart1);
-        HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+        HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
     }
     else if (huart->Instance == USART2)
     {
     	btPacketRdy=false;
     	HAL_UART_AbortReceive(&huart2);
-        HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6);
+        HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
     }
 }
 //---RF EXTI Callback---
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+	//ToDo: edit and add commented code to enable receiving RF
 	//EXTI for RF module (SI4432)
 	//if (GPIO_Pin == GPIO_PIN_8)
 	//{
@@ -199,19 +176,35 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		}*/
 	//}
 }
+void broadcast_mode()
+{
+	HAL_TIM_Base_Stop_IT(&htim3);
+	HAL_UART_AbortReceive(&huart1);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+}
+
+void individual_mode()
+{
+	HAL_TIM_Base_Stop_IT(&htim3);
+	HAL_UART_AbortReceive(&huart1);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+}
+
 void dmx_activate()
 {
 	HAL_UART_AbortReceive(&huart2);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, 513);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
 	HAL_TIM_Base_Start_IT(&htim3);
 }
 void bluetooth_activate()
 {
 	HAL_TIM_Base_Stop_IT(&htim3);
 	HAL_UART_AbortReceive(&huart1);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, dmxRX, 6);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
 }
 
 void bluetooth_at_commands()
@@ -271,13 +264,6 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
-	dmxPacket[0]=0;
-	dmxPacket[1]=255;
-	dmxPacket[2]=255;
-	dmxPacket[3]=0;
-	dmxPacket[4]=0;
-	dmxPacket[5]=0;
-	dmxPacket[6]=0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -305,23 +291,21 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
-  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE+1);
 
   //---Initialize:---
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
-
-  //---SI4432--- //musi byt pred SI, jinak se buguje jako krava
-  SI44_Init(&hspi2, GPIOB, GPIO_PIN_12);
+  //---SI4432---
+  HAL_GPIO_WritePin(SPI2_GPIO_ShutDN_GPIO_Port, SPI2_GPIO_ShutDN_Pin, GPIO_PIN_RESET);
+  HAL_Delay(10);
+  SI44_Init(&hspi2, SPI2_GPIO_NSS_GPIO_Port, SPI2_GPIO_NSS_Pin); //beware - changes have been made!
   HAL_Delay(500); //ToDo: zkratit
   SI44_PresetConfig();
   HAL_Delay(5000);
-  //SI44_SetAGCMode(0b00100000); //6th bit - sgin
+  //SI44_SetAGCMode(0b00100000); //6th bit - sgin - for RX side
   SI44_SetInterrupts1(0b00000100); //1st bit = CRC error
   HAL_Delay(10);
   SI44_SetInterrupts2(0b00000000);
   HAL_Delay(10);
-  SI44_SetTXPower(SI44_TX_POWER_20dBm);    //Set TX power to 11dBm (12.5 mW)
+  SI44_SetTXPower(SI44_TX_POWER_20dBm);
   HAL_Delay(10);
 
   //---LCD---
@@ -334,38 +318,15 @@ int main(void)
   lcd_gotoxy(&lcd1, 4, 1);
   lcd_puts(&lcd1, "TEST MODE");
 
-  //bluetooth_at_commands();
-
-
-  //HAL_Delay(5000);
-  //---Variables---
-  //awakePacket[0]=COMMON_ADDRESS;
-  //awakePacket[2]=AWAKE_PACKET_MARK;
-  //HAL_Delay(2000);
-
   //---DMX receiving---
-  //ALERT! musí být offset u dmxRX - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
+  //ALERT! musí být offset u rxBuff - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
+
+  //---Variables---
 
 
-  uint8_t testPacket[8];
-  testPacket[0]=0xAA;
-  testPacket[1]=0;
-  testPacket[2]=22;
-  testPacket[3]=33;
-  testPacket[4]=44;
-  testPacket[5]=0;
-  testPacket[6]=0;
-  uint8_t checkPacket[2];
-  checkPacket[0]=0xBB;
-  checkPacket[1]=0;
-
-  //HAL_Delay(2000);
   HAL_TIM_Base_Start_IT(&htim2);
 
-
   dmx_activate();
-  //static uint8_t test[515];
-  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, test, 512);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -373,57 +334,19 @@ int main(void)
 
   while (1)
   {
-	  /*char uartBuf[50];
-	  int len = sprintf(uartBuf, "%d %d %d\r\n", dmxRX[1], dmxRX[2], dmxRX[3]);
-	  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);*/
-	  /*testPacket[1]=255;
-	  testPacket[2]=0;
-	  testPacket[3]=255;
-	  SI44_SendPacket(testPacket, sizeof(testPacket));
-	  HAL_Delay(1000);
-	  testPacket[1]=255;
-	  testPacket[2]=255;
-	  testPacket[3]=0;
-	  SI44_SendPacket(testPacket, sizeof(testPacket));
-	  HAL_Delay(1000);
-	  testPacket[1]=0;
-	  testPacket[2]=255;
-	  testPacket[3]=255;
-	  SI44_SendPacket(testPacket, sizeof(testPacket));
-	  HAL_Delay(1000);*/
-	  //SI44_SendPacket(testPacket, sizeof(testPacket));
-	  //dmxPacketRdy=true;
-	  //dmxPacket[1]=255;
-	  //dmxPacket[2]=255;
-
-	  //lcd_gotoxy(&lcd1, 0, 1);
-	  //lcd_puts(&lcd1, "   ");
-	  //HAL_UARTEx_ReceiveToIdle_IT(&huart1, dmxRX, DMXPACKET_SIZE);
-	 /* static uint32_t lastTick=0;
-
-	  //---
-	    char buffer[16];  // buffer pro převod čísla na text
-
-	    sprintf(buffer, "%d", dmxRX[25+1]);  // převede int -> text //offset
-	  lcd_gotoxy(&lcd1, 0, 1);
-	  lcd_puts(&lcd1, buffer);
-	  //dmxRX[1]=5;
-	  //---
-
-	  //Send RF with data --- data are sent with the speed of DMX bus - max. period approx. 22ms?
-*/
-	  //ToDo: Do solo souboru------------------------------------------------------------------------------------
+	  //ToDo: Do solo souboru
 	  //ToDo: Prohazovat kam se ukládá
-	  // ---...
+
+	  //---DMX parsing---
 	  if(dmxPacketRdy==true)
 	  {
 		  dmxPacketRdy=false;
 		  reset_timer(&htim3);
-		  memcpy(dmxPrevPacket, dmxPacket, DMXPACKET_SIZE);
+		  memcpy(dmxPrevPacket, dmxPacket, DMX_PACKET_SIZE);
 		  //__disable_irq(); //The packet shouldn't be rewritten by DMX_IT while copying
-		  memcpy(&dmxPacket[0], &dmxRX[0], DMXPACKET_SIZE);
+		  memcpy(&dmxPacket[0], &rxBuff[0], DMX_PACKET_SIZE);
 		  //__enable_irq();
-		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_OF_CHANNELS*NUM_OF_RECEIVERS); i++)
+		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(5*numOfReceivers+1); i++)
 		  //for(uint16_t i=0; i<6; i++)
 		  {
 			  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
@@ -432,68 +355,88 @@ int main(void)
 				  break;
 			  }
 		  }
-		  char uartBuf[50];
-		  int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
-		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+		  //char uartBuf[50];
+		  //int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
+		  //HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
 	  }
+
+	  //---BT parsing---
 	  if(btPacketRdy==true)
 	  {
 		  btPacketRdy=false;
-		  memcpy(&dmxPacket[1], &dmxRX[0], 6);
-		  dmxCopied=true;
-		  char uartBuf[50];
-		  int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
-		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+		  memcpy(&dmxPrevPacket[1], &dmxPacket[1], 6);
+		  memcpy(&dmxPacket[1], &rxBuff[0], 6);
+		  for(uint16_t i=1; i<7; i++)
+		  //for(uint16_t i=0; i<6; i++)
+		  {
+			  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
+			  {
+				  dmxCopied=true;
+				  break;
+			  }
+		  }
+		  //char uartBuf[50];
+		  //int len = sprintf(uartBuf, "DMX:%d %d %d\r\n", dmxPacket[1], dmxPacket[2], dmxPacket[3]);
+		  //HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
 	  }
-	  if(readyToTransmit==true&&dmxCopied==true) //readyToTransmit==true&&
+
+	  //---DATA PACKET SENDING---
+	  if(readyToTransmit==true&&dmxCopied==true)
 	  {
-	    uint8_t b; //jen pro reset 0x03 registru
-	    SI44_Read(0x04, &b, 1);
-	    SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
-
-
-	    checkPacket[1]+=1;
-	    testPacket[1]=checkPacket[1];
-
-		  dmxCopied=false;
-
-
-		  memcpy(&testPacket[2], &dmxPacket[1], 8);
-		  SI44_SendPacket(testPacket, sizeof(testPacket));
-
-		  char uartBuf[50];
-		  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
-		  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
-		  readyToTransmit=false;
-		  //HAL_UART_Transmit_IT(&huart3, (uint8_t*)uartBuf, len);
-
-	  }
-	  if(readyToTransmit==true&&checkPacketRdy==1)
-	  {
-		  checkPacketRdy=0;
 		  uint8_t b; //jen pro reset 0x03 registru
 		  SI44_Read(0x04, &b, 1);
 		  SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
 
 
-		  SI44_SendPacket(checkPacket, sizeof(checkPacket));
+		  awakePacketID+=1;
+		  txBuff[0]=DATA_PACKET_MARK;
+		  txBuff[1]=awakePacketID; //Todo: ZPOŽDĚNÍ NA STRANĚ VYSÍLAČE?
+
+		  dmxCopied=false;
+
+
+		  memcpy(&txBuff[2], &dmxPacket[1], 5*numOfReceivers+1);
+		  SI44_SendPacket(txBuff, dataPacketSize);
+
+		  readyToTransmit=false;
+		  //char uartBuf[50];
+		  //int len = sprintf(uartBuf, "%d %d %d\r\n", txBuff[1], txBuff[2], txBuff[3]);
+		  //HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
+
+		  //HAL_UART_Transmit_IT(&huart3, (uint8_t*)uartBuf, len);
+
+	  }
+	  //---AWAKE PACKET SEND---
+	  if(readyToTransmit==true&&awakePacketRdy==1)
+	  {
+		  awakePacketRdy=0;
+		  uint8_t b; //jen pro reset 0x03 registru
+		  SI44_Read(0x04, &b, 1);
+		  SI44_Read(0x03, &b, 1); //jinak by uz neaktivoval IRQ
+
+		  txBuff[0]=AWAKE_PACKET_MARK;
+		  txBuff[1]=awakePacketID;
+
+		  SI44_SendPacket(txBuff, AWAKE_PACKET_SIZE);
 		  readyToTransmit=false;
 	  }
+	  //---SIGNAL LOST PACKET SEND---
 	  if(readyToTransmit==true&&signalLostDMX==1)
 	  {
 		  signalLostDMX=0;
-		  checkPacket[1]+=1;
-		  testPacket[1]=checkPacket[1];
-		  testPacket[2]=0;
-		  testPacket[3]=0;
-		  testPacket[4]=0;
-		  testPacket[5]=0;
-		  testPacket[6]=0;
-		  testPacket[7]=0;
-		  SI44_SendPacket(testPacket, sizeof(testPacket));
+		  awakePacketID+=1;
+		  txBuff[0]=DATA_PACKET_MARK;
+		  txBuff[1]=awakePacketID;
+		  txBuff[2]=0;
+		  txBuff[3]=0;
+		  txBuff[4]=0;
+		  txBuff[5]=0;
+		  txBuff[6]=0;
+		  txBuff[7]=0;
+		  SI44_SendPacket(txBuff, dataPacketSize);
 	  }
 
-	 //-------------------------------------------------------------------------------------------
+	 //---BUTTONS:----------------------------------------------------------
 	  if(HAL_GPIO_ReadPin(BTN1_UP_GPIO_Port, BTN1_UP_Pin) == GPIO_PIN_RESET)
 	  {
 		  lcd_clear(&lcd1);
@@ -520,63 +463,6 @@ int main(void)
 		  lcd_puts(&lcd1, "MODE: BLUETOOTH");
 		  bluetooth_activate();
 	  }
-	//---...
-	  /*SI44_SendPacket(testPacket, sizeof(testPacket));
-
-	  char uartBuf[50];
-	  int len = sprintf(uartBuf, "%d %d %d\r\n", testPacket[1], testPacket[2], testPacket[3]);
-	  HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
-	  HAL_Delay(1000);*/
-
-
-	  //char uartBuf[50];
-	 // int len = sprintf(uartBuf, "%d %d %d\r\n", dmxRX[1], dmxRX[2], testPacket[3]);
-	  //HAL_UART_Transmit_IT(&huart1, (uint8_t*)uartBuf, len);
-	  //HAL_Delay(1000);
-	  /*
-
-	  if(dmxPacketRdy==true&&readyToTransmit==true) //if DMX packet ready and RF not currently transmitting
-	  {
-		  //if(dmxPacket[0]==DMX_STARTBYTE) //don't listen to messages that are not meant for you...
-		  //{
-			  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_OF_CHANNELS*NUM_OF_RECEIVERS); i++)
-			  {
-				  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
-				  {
-					  memcpy(&toSendPacket[0], &dmxPacket[currentDMXAddress], NUM_OF_CHANNELS*NUM_OF_RECEIVERS);
-					  SI44_SendPacket(toSendPacket, sizeof(toSendPacket));
-					  break;
-				  }
-			  }
-
-		  //}
-		  readyToTransmit=false;
-		  dmxPacketRdy=false;
-	  }/*
-	  for(uint8_t i=0; i<255;i++)
-	  {
-		  //testPacket[0]=testPacket[0]+30;
-		  SI44_SendPacket(testPacket, sizeof(testPacket));
-		  HAL_Delay(1000);
-
-	  }*/
-
-
-	  //if dmxPacketRdy -> rfPacketRdy
-	  //if rfPacketRdy -> odesli
-	  //if
-//--------------
-	  //Send RF packet to keep receivers awake
-	  //ToDo: set address function
-	  /*if(HAL_GetTick()-lastTick>AWAKE_PACKET_PERIOD)
-	  {
-		  for(uint8_t i=0; i<activeGroups; i++) //awake packet doesnt isnt multi dimensional array
-		  {
-			  awakePacket[1]=i+1;
-			  nrf24_transmit(awakePacket, AWAKE_PACKET_LENGTH);
-		  }
-		  lastTick=HAL_GetTick();
-	  }*/
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
