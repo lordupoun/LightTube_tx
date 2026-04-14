@@ -38,7 +38,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DATA_PACKET_MARK 0xAA
+
+//DATA PACKETS MARKS:
+#define BROADCAST_PACKET_MARK 0xA1
+#define INDIVIDUAL_PACKET_MARK 0xA2
 #define DATA_MAX_PACKET_SIZE 33
 
 #define AWAKE_PACKET_MARK 0xBB
@@ -48,6 +51,13 @@
 //DMX defines
 #define DMX_PACKET_SIZE 513 //do not change
 #define DMX_STARTBYTE 0 //defines what startbyte the receiver listens to; 0 default for light control by standard
+
+#define BT_RECEIVE_BYTES 31 //NUM of bytes to receive from BT module;
+
+#define NUM_COMMON_CHANNELS 1
+#define NUM_CHANNELS 5
+
+
 
 I2C_LCD_HandleTypeDef lcd1;
 /* USER CODE END PD */
@@ -77,6 +87,8 @@ static uint8_t dataPacketSize = 8;		 //Current size of RF data packet
 static uint8_t numOfReceivers = 1;		 //Number of receivers = number of uniquely addressable tubes (if 1, all share the same data)
 static uint16_t currentDMXAddress=1; 	 	 //Current address of the DMX receiver
 static uint8_t awakePacketID = 0;		 //ID of awake packet = the same as an ID of the last data packet
+static uint8_t packetType=BROADCAST_PACKET_MARK; //Currently transmitted packetType
+void (*active_mode_func)(void) = NULL;  //pointer to currently active mode startup function
 
 static uint8_t rxBuff[DMX_PACKET_SIZE+1]; 	    //receive buffer for both DMX and bluetooth
 static uint8_t dmxPacket[DMX_PACKET_SIZE]; 		//One received DMX packet
@@ -136,7 +148,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 	else if (huart->Instance==USART2)
 	{
 		btPacketRdy=true;
-		HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+		HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, BT_RECEIVE_BYTES);
 	}
 }
 //---DMX receiving failed Callback---
@@ -152,7 +164,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     {
     	btPacketRdy=false;
     	HAL_UART_AbortReceive(&huart2);
-        HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+        HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, BT_RECEIVE_BYTES);
     }
 }
 //---RF EXTI Callback---
@@ -178,22 +190,28 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 }
 void broadcast_mode()
 {
-	HAL_TIM_Base_Stop_IT(&htim3);
+	//Add STOP TIM?
 	HAL_UART_AbortReceive(&huart1);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+	HAL_UART_AbortReceive(&huart2);
+	packetType=BROADCAST_PACKET_MARK;
+	numOfReceivers=1;
+	dataPacketSize=8;  //Should reapply values in app
+	active_mode_func(); //Looks like it won't be needed
 }
 
 void individual_mode()
 {
-	HAL_TIM_Base_Stop_IT(&htim3);
 	HAL_UART_AbortReceive(&huart1);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+	HAL_UART_AbortReceive(&huart2);
+	packetType=INDIVIDUAL_PACKET_MARK;
+	numOfReceivers=6;
+	dataPacketSize=33;
+	active_mode_func();
 }
 
 void dmx_activate()
 {
+	active_mode_func = dmx_activate;
 	HAL_UART_AbortReceive(&huart2);
 	HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
 	HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
@@ -201,10 +219,11 @@ void dmx_activate()
 }
 void bluetooth_activate()
 {
+	active_mode_func = bluetooth_activate;
 	HAL_TIM_Base_Stop_IT(&htim3);
 	HAL_UART_AbortReceive(&huart1);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
-	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, dataPacketSize-2);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, BT_RECEIVE_BYTES);
+	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, BT_RECEIVE_BYTES);
 }
 
 void bluetooth_at_commands()
@@ -292,27 +311,34 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  //---Initialize:---
-  //---SI4432---
-  HAL_GPIO_WritePin(SPI2_GPIO_ShutDN_GPIO_Port, SPI2_GPIO_ShutDN_Pin, GPIO_PIN_RESET);
-  HAL_Delay(10);
-  SI44_Init(&hspi2, SPI2_GPIO_NSS_GPIO_Port, SPI2_GPIO_NSS_Pin); //beware - changes have been made!
-  HAL_Delay(500); //ToDo: zkratit
-  SI44_PresetConfig();
-  HAL_Delay(5000);
-  //SI44_SetAGCMode(0b00100000); //6th bit - sgin - for RX side
-  SI44_SetInterrupts1(0b00000100); //1st bit = CRC error
-  HAL_Delay(10);
-  SI44_SetInterrupts2(0b00000000);
-  HAL_Delay(10);
-  SI44_SetTXPower(SI44_TX_POWER_20dBm);
-  HAL_Delay(10);
-
   //---LCD---
   lcd1.hi2c = &hi2c1;
   lcd1.address = (0x27 << 1);
   lcd_init(&lcd1);
   HAL_Delay(100);
+  lcd_gotoxy(&lcd1, 0, 0);
+  lcd_puts(&lcd1, "LightTube");
+  lcd_gotoxy(&lcd1, 4, 1);
+  lcd_puts(&lcd1, "LOADING");
+
+  //---Initialize:---
+  //---SI4432---
+  HAL_GPIO_WritePin(SPI2_GPIO_ShutDN_GPIO_Port, SPI2_GPIO_ShutDN_Pin, GPIO_PIN_RESET);
+  HAL_Delay(10);
+  SI44_Init(&hspi2, SPI2_GPIO_NSS_GPIO_Port, SPI2_GPIO_NSS_Pin); //beware - changes have been made!
+  HAL_Delay(10); //ToDo: zkratit
+  SI44_PresetConfig();
+  HAL_Delay(50);
+  //SI44_SetAGCMode(0b00100000); //6th bit - sgin - for RX side
+  SI44_SetInterrupts1(0b00000100); //1st bit = CRC error
+  HAL_Delay(5);
+  SI44_SetInterrupts2(0b00000000);
+  HAL_Delay(5);
+  SI44_SetModuleAntenna();
+  HAL_Delay(5);
+  SI44_SetTXPower(SI44_TX_POWER_20dBm);
+  HAL_Delay(100);
+
   lcd_gotoxy(&lcd1, 0, 0);
   lcd_puts(&lcd1, "LightTube");
   lcd_gotoxy(&lcd1, 4, 1);
@@ -346,7 +372,7 @@ int main(void)
 		  //__disable_irq(); //The packet shouldn't be rewritten by DMX_IT while copying
 		  memcpy(&dmxPacket[0], &rxBuff[0], DMX_PACKET_SIZE);
 		  //__enable_irq();
-		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(5*numOfReceivers+1); i++)
+		  for(uint16_t i=currentDMXAddress; i<currentDMXAddress+(NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS); i++)
 		  //for(uint16_t i=0; i<6; i++)
 		  {
 			  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
@@ -364,9 +390,9 @@ int main(void)
 	  if(btPacketRdy==true)
 	  {
 		  btPacketRdy=false;
-		  memcpy(&dmxPrevPacket[1], &dmxPacket[1], 6);
-		  memcpy(&dmxPacket[1], &rxBuff[0], 6);
-		  for(uint16_t i=1; i<7; i++)
+		  memcpy(&dmxPrevPacket[1], &dmxPacket[1], NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+		  memcpy(&dmxPacket[1], &rxBuff[0], NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+		  for(uint16_t i=1; i<=NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS; i++)
 		  //for(uint16_t i=0; i<6; i++)
 		  {
 			  if(dmxPacket[i]!=dmxPrevPacket[i])//if the packet has changed
@@ -389,14 +415,14 @@ int main(void)
 
 
 		  awakePacketID+=1;
-		  txBuff[0]=DATA_PACKET_MARK;
+		  txBuff[0]=packetType;
 		  txBuff[1]=awakePacketID; //Todo: ZPOŽDĚNÍ NA STRANĚ VYSÍLAČE?
 
 		  dmxCopied=false;
 
 
-		  memcpy(&txBuff[2], &dmxPacket[1], 5*numOfReceivers+1);
-		  SI44_SendPacket(txBuff, dataPacketSize);
+		  memcpy(&txBuff[2], &dmxPacket[1], NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+		  SI44_SendPacket(txBuff, dataPacketSize); //ToDo: dataPacketSize - vyjadrit v definech a numOfReceivers
 
 		  readyToTransmit=false;
 		  //char uartBuf[50];
@@ -425,14 +451,12 @@ int main(void)
 	  {
 		  signalLostDMX=0;
 		  awakePacketID+=1;
-		  txBuff[0]=DATA_PACKET_MARK;
+		  txBuff[0]=packetType;
 		  txBuff[1]=awakePacketID;
-		  txBuff[2]=0;
-		  txBuff[3]=0;
-		  txBuff[4]=0;
-		  txBuff[5]=0;
-		  txBuff[6]=0;
-		  txBuff[7]=0;
+		  for(uint8_t i=2; i<NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS+2; i++)
+		  {
+			  txBuff[i]=0;
+		  }
 		  SI44_SendPacket(txBuff, dataPacketSize);
 	  }
 
@@ -446,15 +470,17 @@ int main(void)
 	  }
 	  if(HAL_GPIO_ReadPin(BTN2_LEFT_GPIO_Port, BTN2_LEFT_Pin) == GPIO_PIN_RESET)
 	  {
-		  lcd_gotoxy(&lcd1, 0, 0);
-		  lcd_puts(&lcd1, "DolevaTest");
-		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
+		  lcd_clear(&lcd1);
+		  lcd_gotoxy(&lcd1, 0, 1);
+		  lcd_puts(&lcd1, "MODE: BROADCAST");
+		  broadcast_mode();
 	  }
 	  if(HAL_GPIO_ReadPin(BTN3_RIGHT_GPIO_Port, BTN3_RIGHT_Pin) == GPIO_PIN_RESET)
 	  {
-	  	  lcd_gotoxy(&lcd1, 0, 0);
-	  	  lcd_puts(&lcd1, "DopravaTest");
-	  	//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
+		  lcd_clear(&lcd1);
+		  lcd_gotoxy(&lcd1, 0, 1);
+	  	  lcd_puts(&lcd1, "MODE: INDIVIDUAL");
+	  	  individual_mode();
 	  }
 	  if(HAL_GPIO_ReadPin(BTN4_DOWN_GPIO_Port, BTN4_DOWN_Pin) == GPIO_PIN_RESET)
 	  {
