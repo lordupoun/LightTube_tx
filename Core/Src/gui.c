@@ -316,7 +316,7 @@ void gui_setScreen()
 		case CHANGE_TUBES_ASSIGN:
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
-			lcd_puts(lcd1, "UNPLUG DMX!");
+			lcd_puts(lcd1, "IDENTIFY TUBES");
 			lcd_gotoxy(lcd1, 0, 1);
 			lcd_puts(lcd1, " -PRESS ENTER-");
 			break;

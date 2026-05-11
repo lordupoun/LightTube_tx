@@ -318,6 +318,7 @@ void load_settings_from_EEPROM()
 		individual_mode();
 }
 
+//For TUBE IDENTIFY BLUETOOTH must be set or DMX signal (not changing values) must be plugged into the transmitter
 void identify_tube_address() //ToDo: implement as a custom packet
 {
 	/*for(uint8_t i=4; i<dataPacketSize; i=i+4)
