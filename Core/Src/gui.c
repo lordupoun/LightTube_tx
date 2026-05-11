@@ -11,7 +11,7 @@
 
 extern const ScreenItem_t mainScreen, setModeScreen, setTransmitScreen, setAddressScreen;
 extern const ScreenItem_t changeModeScreen, changeTransmitScreen, changeAddressScreen;
-extern const ScreenItem_t setPresetsScreen, changePresetsScreen, setSaveScreen, changeSaveScreen;
+extern const ScreenItem_t setPresetsScreen, changePresetsScreen, setSaveScreen, changeSaveScreen, setTubesAssignScreen, changeTubesAssignScreen;
 
 static void incModeValue(void);
 static void decModeValue(void);
@@ -28,19 +28,22 @@ static void confirmAddrValue(void);
 static void incSaveValue(void);
 static void decSaveValue(void);
 static void confirmSaveValue(void);
+static void showTubeNumber(void);
+static void nullFunction(void);
 
 static I2C_LCD_HandleTypeDef* lcd1;
 
 static const ScreenItem_t* currentScreen = &mainScreen;
 
 static uint16_t* dmxAddrPtr = 0;
-static Mode_t* currentMode;
-static Transmit_t* currentTransmit;
+static Mode_t* currentMode; //ToDo: change to currentModePtr
+static Transmit_t* currentTransmit; //ToDo: change to currentTransmitPtr
 
 static uint16_t localDMXAddress; //Local address only for GUI, before accepting changes
 static Mode_t localCurrentMode;
 static Transmit_t localCurrentTransmit;
 static bool localSave;
+static uint8_t* numOfReceiversPtr;
 
 //DEFINES BEHAVIOR OF BUTTONS ON EACH SCREEN
 const ScreenItem_t mainScreen =
@@ -57,7 +60,7 @@ const ScreenItem_t setModeScreen =
 {
 		.name = SET_MODE,
 		.editable = false,
-	    .up = &setSaveScreen,
+	    .up = &setTubesAssignScreen,
 	    .down = &setTransmitScreen,
 	    .enter = &changeModeScreen,
 	    .prev = &mainScreen
@@ -151,7 +154,7 @@ const ScreenItem_t setSaveScreen =
 		.name = SET_SAVE,
 		.editable = false,
 	    .up = &setPresetsScreen,
-	    .down = &setModeScreen,
+	    .down = &setTubesAssignScreen,
 	    .enter = &changeSaveScreen,
 	    .prev = &mainScreen
 };
@@ -169,10 +172,37 @@ const ScreenItem_t changeSaveScreen =
 		.enter_action = confirmSaveValue,
 		//.value = 20
 };
+const ScreenItem_t setTubesAssignScreen =
+{
+		.name = SET_TUBES_ASSIGN,
+		.editable = false,
+	    .up = &setSaveScreen,
+	    .down = &setModeScreen,
+	    .enter = &changeTubesAssignScreen,
+	    .prev = &mainScreen,
+		.up_action = NULL,
+		.down_action = NULL,
+		.enter_action = NULL,
+		//.value = 20
+};
+
+const ScreenItem_t changeTubesAssignScreen =
+{
+		.name = CHANGE_TUBES_ASSIGN,
+		.editable = true,
+	    .up = NULL,
+	    .down = NULL,
+	    .enter = NULL,
+	    .prev = &setTubesAssignScreen,
+		.up_action = nullFunction,
+		.down_action = nullFunction,
+		.enter_action = showTubeNumber,
+		//.value = 20
+};
 
 
 //Pointer to current DMX512 address, Currently used LCD
-void gui_init(Mode_t* mode, Transmit_t* transmit,uint16_t* addr, I2C_LCD_HandleTypeDef* lcd)
+void gui_init(Mode_t* mode, Transmit_t* transmit, uint16_t* addr, I2C_LCD_HandleTypeDef* lcd, uint8_t* receiversNum)
 {
 	currentMode=mode;
 	currentTransmit=transmit;
@@ -181,6 +211,7 @@ void gui_init(Mode_t* mode, Transmit_t* transmit,uint16_t* addr, I2C_LCD_HandleT
 	localDMXAddress=*dmxAddrPtr;
 	localCurrentMode=*mode;
 	localCurrentTransmit=*transmit;
+	numOfReceiversPtr=receiversNum;
 }
 
 //Defines GRAPHICS and TEXTS for EACH SCREEN
@@ -220,24 +251,26 @@ void gui_setScreen()
 			lcd_puts(lcd1, text);
 			break;
 		case CHANGE_MODE:
+			localCurrentMode=*currentMode;
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
 			lcd_puts(lcd1, "CHANGE MODE TO:");
 			lcd_gotoxy(lcd1, 0, 1);
 			if(*currentMode==DMX512)
-				lcd_puts(lcd1, "MODE: DMX512");
+				lcd_puts(lcd1, "   -DMX512-");
 			if(*currentMode==BLUETOOTH)
-				lcd_puts(lcd1, "MODE: BLUETOOTH");
+				lcd_puts(lcd1, "  -BLUETOOTH-");
 			break;
 		case CHANGE_TRANSMIT:
+			localCurrentTransmit=*currentTransmit;
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
 			lcd_puts(lcd1, "CHANGE TX TO:");
 			lcd_gotoxy(lcd1, 0, 1);
 			if(*currentTransmit==BROADCAST)
-				lcd_puts(lcd1, "TX: BROADCAST");
+				lcd_puts(lcd1, "  -BROADCAST-");
 			if(*currentTransmit==INDIVIDUAL)
-				lcd_puts(lcd1, "TX: INDIVIDUAL");
+				lcd_puts(lcd1, "  -INDIVIDUAL-");
 			break;
 		case CHANGE_ADDRESS:
 			localDMXAddress=*dmxAddrPtr;
@@ -266,14 +299,26 @@ void gui_setScreen()
 			localSave=false;
 			gui_drawSettings();
 			lcd_gotoxy(lcd1, 0, 1);
-			lcd_puts(lcd1, "SAVE TO EEPROM?");
+			lcd_puts(lcd1, "SAVE TO FLASH?");
 			break;
 		case CHANGE_SAVE:
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
-			lcd_puts(lcd1, "SAVE TO EEPROM:");
+			lcd_puts(lcd1, "SAVE TO FLASH:");
 			lcd_gotoxy(lcd1, 0, 1);
-			lcd_puts(lcd1, "NO");
+			lcd_puts(lcd1, "     -NO-");
+			break;
+		case SET_TUBES_ASSIGN:
+			gui_drawSettings();
+			lcd_gotoxy(lcd1, 0, 1);
+			lcd_puts(lcd1, "IDENTIFY TUBES?");
+			break;
+		case CHANGE_TUBES_ASSIGN:
+			lcd_clear(lcd1);
+			lcd_gotoxy(lcd1, 0, 0);
+			lcd_puts(lcd1, "UNPLUG DMX!");
+			lcd_gotoxy(lcd1, 0, 1);
+			lcd_puts(lcd1, " -PRESS ENTER-");
 			break;
 
 	}
@@ -344,7 +389,7 @@ void incAddrValue()
 	char text[6];
 	lcd_gotoxy(lcd1, 9, 1);
 	lcd_puts(lcd1, "     ");
-	if(localDMXAddress<512)
+	if(localDMXAddress<512-(NUM_CHANNELS*(*numOfReceiversPtr)+NUM_COMMON_CHANNELS))
 	{
 		localDMXAddress+=1;
 	}
@@ -374,19 +419,19 @@ void confirmAddrValue()
 
 void incModeValue()
 {
-	lcd_gotoxy(lcd1, 6, 1);
-	lcd_puts(lcd1, "         ");
+	lcd_gotoxy(lcd1, 0, 1);
+	lcd_puts(lcd1, "               ");
 	if(localCurrentMode==DMX512)
 	{
 		localCurrentMode=BLUETOOTH;
-		lcd_gotoxy(lcd1, 6, 1);
-		lcd_puts(lcd1, "BLUETOOTH");
+		lcd_gotoxy(lcd1, 0, 1);
+		lcd_puts(lcd1, "  -BLUETOOTH-");
 	}
 	else
 	{
 		localCurrentMode=DMX512;
-		lcd_gotoxy(lcd1, 6, 1);
-		lcd_puts(lcd1, "DMX512");
+		lcd_gotoxy(lcd1, 0, 1);
+		lcd_puts(lcd1, "   -DMX512-");
 	}
 }
 void decModeValue()
@@ -410,19 +455,19 @@ void confirmModeValue()
 
 void incTransmitValue()
 {
-	lcd_gotoxy(lcd1, 4, 1);
-	lcd_puts(lcd1, "          ");
+	lcd_gotoxy(lcd1, 0, 1);
+	lcd_puts(lcd1, "               ");
 	if(localCurrentTransmit==BROADCAST)
 	{
 		localCurrentTransmit=INDIVIDUAL;
-		lcd_gotoxy(lcd1, 4, 1);
-		lcd_puts(lcd1, "INDIVIDUAL");
+		lcd_gotoxy(lcd1, 0, 1);
+		lcd_puts(lcd1, "  -INDIVIDUAL-");
 	}
 	else
 	{
 		localCurrentTransmit=BROADCAST;
-		lcd_gotoxy(lcd1, 4, 1);
-		lcd_puts(lcd1, "BROADCAST");
+		lcd_gotoxy(lcd1, 0, 1);
+		lcd_puts(lcd1, "  -BROADCAST-");
 	}
 }
 void decTransmitValue()
@@ -452,13 +497,13 @@ void incSaveValue()
 	{
 		localSave=true;
 		lcd_gotoxy(lcd1, 0, 1);
-		lcd_puts(lcd1, "YES");
+		lcd_puts(lcd1, "     -YES-");
 	}
 	else
 	{
 		localSave=false;
 		lcd_gotoxy(lcd1, 0, 1);
-		lcd_puts(lcd1, "NO");
+		lcd_puts(lcd1, "     -NO- ");
 	}
 }
 void decSaveValue()
@@ -467,13 +512,34 @@ void decSaveValue()
 }
 void confirmSaveValue()
 {
+	if(localSave==true)
+	{
+		lcd_clear(lcd1);
+		lcd_gotoxy(lcd1, 0, 0);
+		lcd_puts(lcd1, "SAVING TO FLASH");
+		flash_saveSettings(*dmxAddrPtr, *currentMode, *currentTransmit);
+		lcd_gotoxy(lcd1, 0, 1);
+		lcd_puts(lcd1, "VALUES SAVED!");
+		HAL_Delay(2000);
+	}
+	currentScreen=&setSaveScreen;
+	gui_setScreen();
+}
+void showTubeNumber()
+{
+	identify_tube_address();
 	lcd_clear(lcd1);
 	lcd_gotoxy(lcd1, 0, 0);
-	lcd_puts(lcd1, "SAVING TO EEPROM");
-	flash_saveSettings(*dmxAddrPtr, *currentMode, *currentTransmit);
+	lcd_puts(lcd1, "IDENTIFYING");
 	lcd_gotoxy(lcd1, 0, 1);
-	lcd_puts(lcd1, "VALUES SAVED!");
-	currentScreen=&setSaveScreen;
-	HAL_Delay(2000);
+	lcd_puts(lcd1, "");
+	HAL_Delay(500);
+
+	currentScreen=&setTubesAssignScreen;
 	gui_setScreen();
+}
+
+void nullFunction()
+{
+
 }

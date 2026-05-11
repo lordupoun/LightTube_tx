@@ -98,13 +98,13 @@ void lcd_gotoxy(I2C_LCD_HandleTypeDef *lcd, int col, int row)
 void lcd_init(I2C_LCD_HandleTypeDef *lcd)
 {
     HAL_Delay(50);  // Wait for LCD power-up
-    lcd_send_cmd(lcd, 0x30);  // Wake up command
+    lcd_send_nibble(lcd, 0x30);  // Wake up command
     HAL_Delay(5);
-    lcd_send_cmd(lcd, 0x30);  // Wake up command
+    lcd_send_nibble(lcd, 0x30);  // Wake up command
     HAL_Delay(1);
-    lcd_send_cmd(lcd, 0x30);  // Wake up command
+    lcd_send_nibble(lcd, 0x30);  // Wake up command
     HAL_Delay(10);
-    lcd_send_cmd(lcd, 0x20);  // Set to 4-bit mode
+    lcd_send_nibble(lcd, 0x20);  // Set to 4-bit mode
     HAL_Delay(10);
 
     // LCD configuration commands
@@ -118,7 +118,18 @@ void lcd_init(I2C_LCD_HandleTypeDef *lcd)
     HAL_Delay(1);
     lcd_send_cmd(lcd, 0x0C);  // Display on, cursor off, blink off
 }
+/**
+ * @brief  Sends a single 4-bit nibble to the LCD (used only during init). BY AI
+ */
+void lcd_send_nibble(I2C_LCD_HandleTypeDef *lcd, uint8_t nibble)
+{
+    uint8_t data_t[2];
 
+    data_t[0] = nibble | 0x0C;  // en=1, rs=0
+    data_t[1] = nibble | 0x08;  // en=0, rs=0
+
+    HAL_I2C_Master_Transmit(lcd->hi2c, lcd->address, data_t, 2, 100);
+}
 /**
  * @brief  Sends a string to the LCD.
  * @param  lcd: Pointer to the LCD handle

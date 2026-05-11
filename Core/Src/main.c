@@ -56,8 +56,9 @@
 
 #define BT_RECEIVE_BYTES 31 //NUM of bytes to receive from BT module;
 
-#define NUM_COMMON_CHANNELS 1
-#define NUM_CHANNELS 5
+//MOVED TO main.h
+//#define NUM_COMMON_CHANNELS 1
+//#define NUM_CHANNELS 5
 
 
 
@@ -144,7 +145,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     {
     	signalLostDMX=1;
     }
-    else if (htim->Instance == TIM4)
+    if (htim->Instance == TIM4)
     {
     	debounceTimerFinished=true;
     }
@@ -222,6 +223,12 @@ void individual_mode()
 	packetType=INDIVIDUAL_PACKET_MARK;
 	numOfReceivers=6;
 	dataPacketSize=33;
+	//AUTOMATICALLY MOVES ADDRESS IF OUT OF BOUNDS FOR INDIVIDUAL MODE
+	uint16_t bugfix = 512-(NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+	if(currentDMXAddress>bugfix)
+	{
+		currentDMXAddress=bugfix;
+	}
 	active_mode_func();
 }
 
@@ -311,6 +318,27 @@ void load_settings_from_EEPROM()
 		individual_mode();
 }
 
+void identify_tube_address() //ToDo: implement as a custom packet
+{
+	/*for(uint8_t i=4; i<dataPacketSize; i=i+4)
+	{
+		txBuff[i]=250;
+	}*/
+	txBuff[6]=250;
+	while(readyToTransmit!=true)
+	{
+
+	}
+	awakePacketID+=1;
+	txBuff[0]=BROADCAST_PACKET_MARK;
+	txBuff[1]=awakePacketID;
+	uint8_t b; //jen pro reset 0x03 registru
+	SI44_Read(0x04, &b, 1);
+	SI44_Read(0x03, &b, 1);
+	SI44_SendPacket(txBuff, dataPacketSize);
+	readyToTransmit=false;
+}
+
 void reset_timer(TIM_HandleTypeDef *htim)
 {
 	__HAL_TIM_SET_COUNTER(htim, 0);
@@ -358,6 +386,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   //---LCD---
+  HAL_Delay(100);
   lcd1.hi2c = &hi2c1;
   lcd1.address = (0x27 << 1);
   lcd_init(&lcd1);
@@ -395,9 +424,10 @@ int main(void)
   //---Variables---
   //
   load_settings_from_EEPROM();
-  gui_init(&currentMode, &currentTransmit, &currentDMXAddress, &lcd1);
+  gui_init(&currentMode, &currentTransmit, &currentDMXAddress, &lcd1, &numOfReceivers);
   gui_setScreen();
   HAL_TIM_Base_Start_IT(&htim2);
+  //individual_mode();
 
   //dmx_activate();
   //broadcast_mode();
@@ -470,8 +500,14 @@ int main(void)
 
 		  dmxCopied=false;
 
-
-		  memcpy(&txBuff[2], &dmxPacket[1], NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+		  if (currentMode == DMX512)
+		  {
+			  memcpy(&txBuff[2], &dmxPacket[currentDMXAddress], NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+		  }
+		  else if (currentMode == BLUETOOTH)
+		  {
+			  memcpy(&txBuff[2], &dmxPacket[1], NUM_CHANNELS*numOfReceivers+NUM_COMMON_CHANNELS);
+		  }
 		  SI44_SendPacket(txBuff, dataPacketSize); //ToDo: dataPacketSize - vyjadrit v definech a numOfReceivers
 
 		  readyToTransmit=false;

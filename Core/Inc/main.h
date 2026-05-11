@@ -89,6 +89,9 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 
+#define NUM_COMMON_CHANNELS 1
+#define NUM_CHANNELS 5
+
 enum {
     BROADCAST,
 	INDIVIDUAL
