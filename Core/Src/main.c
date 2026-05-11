@@ -29,6 +29,7 @@
 #include <stdbool.h> //bool
 #include "si4432.h"
 #include "i2c_lcd.h"
+#include "gui.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -82,10 +83,10 @@ UART_HandleTypeDef huart2;
 //ToDo: Rozmístit do samostatných souborů DMX a RF
 //ToDo: do mainu jako static
 
-//GLOBAL VARIABLES
+//VARIABLES
 static uint8_t dataPacketSize = 8;		 //Current size of RF data packet
 static uint8_t numOfReceivers = 1;		 //Number of receivers = number of uniquely addressable tubes (if 1, all share the same data)
-static uint16_t currentDMXAddress=1; 	 	 //Current address of the DMX receiver
+static uint16_t currentDMXAddress=20; 	 	 //Current address of the DMX receiver
 static uint8_t awakePacketID = 0;		 //ID of awake packet = the same as an ID of the last data packet
 static uint8_t packetType=BROADCAST_PACKET_MARK; //Currently transmitted packetType
 void (*active_mode_func)(void) = NULL;  //pointer to currently active mode startup function
@@ -94,6 +95,8 @@ static uint8_t rxBuff[DMX_PACKET_SIZE+1]; 	    //receive buffer for both DMX and
 static uint8_t dmxPacket[DMX_PACKET_SIZE]; 		//One received DMX packet
 static uint8_t dmxPrevPacket[DMX_PACKET_SIZE]; 	//One previously received DMX packet
 static uint8_t txBuff[DATA_MAX_PACKET_SIZE];		//Buffer for RF TX
+Mode_t currentMode = DMX512;
+Transmit_t currentTransmit = BROADCAST;
 
 //the rest of variables is in main
 
@@ -191,6 +194,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void broadcast_mode()
 {
 	//Add STOP TIM?
+	currentTransmit=BROADCAST;
 	HAL_UART_AbortReceive(&huart1);
 	HAL_UART_AbortReceive(&huart2);
 	packetType=BROADCAST_PACKET_MARK;
@@ -201,6 +205,7 @@ void broadcast_mode()
 
 void individual_mode()
 {
+	currentTransmit=INDIVIDUAL;
 	HAL_UART_AbortReceive(&huart1);
 	HAL_UART_AbortReceive(&huart2);
 	packetType=INDIVIDUAL_PACKET_MARK;
@@ -211,20 +216,31 @@ void individual_mode()
 
 void dmx_activate()
 {
+	currentMode=DMX512;
 	active_mode_func = dmx_activate;
 	HAL_UART_AbortReceive(&huart2);
 	HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
 	HAL_UARTEx_ReceiveToIdle_IT(&huart1, rxBuff, DMX_PACKET_SIZE);
 	HAL_TIM_Base_Start_IT(&htim3);
+	//gui_setScreen();
+	//gui_drawBase();
+	//lcd_gotoxy(&lcd1, 0, 1);
+	//lcd_puts(&lcd1, "MODE: DMX512");
 }
 void bluetooth_activate()
 {
+	currentMode=BLUETOOTH;
 	active_mode_func = bluetooth_activate;
 	HAL_TIM_Base_Stop_IT(&htim3);
 	HAL_UART_AbortReceive(&huart1);
 	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, BT_RECEIVE_BYTES);
 	HAL_UARTEx_ReceiveToIdle_IT(&huart2, rxBuff, BT_RECEIVE_BYTES);
+	//gui_setScreen();
+	//gui_drawBase();
+	//lcd_gotoxy(&lcd1, 0, 1);
+	//lcd_puts(&lcd1, "MODE: BLUETOOTH");
 }
+
 
 void bluetooth_at_commands()
 {
@@ -315,11 +331,13 @@ int main(void)
   lcd1.hi2c = &hi2c1;
   lcd1.address = (0x27 << 1);
   lcd_init(&lcd1);
+  gui_init(&currentMode, &currentTransmit, &currentDMXAddress, &lcd1);
   HAL_Delay(100);
-  lcd_gotoxy(&lcd1, 0, 0);
-  lcd_puts(&lcd1, "LightTube");
-  lcd_gotoxy(&lcd1, 4, 1);
-  lcd_puts(&lcd1, "LOADING");
+  gui_drawBase();
+  lcd_gotoxy(&lcd1, 3, 1);
+  lcd_puts(&lcd1, "-LOADING-");
+
+
 
   //---Initialize:---
   //---SI4432---
@@ -339,20 +357,20 @@ int main(void)
   SI44_SetTXPower(SI44_TX_POWER_20dBm);
   HAL_Delay(100);
 
-  lcd_gotoxy(&lcd1, 0, 0);
-  lcd_puts(&lcd1, "LightTube");
-  lcd_gotoxy(&lcd1, 4, 1);
-  lcd_puts(&lcd1, "TEST MODE");
+
 
   //---DMX receiving---
   //ALERT! musí být offset u rxBuff - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
 
   //---Variables---
-
+  gui_setScreen();
 
   HAL_TIM_Base_Start_IT(&htim2);
 
   dmx_activate();
+  broadcast_mode();
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -463,31 +481,27 @@ int main(void)
 	 //---BUTTONS:----------------------------------------------------------
 	  if(HAL_GPIO_ReadPin(BTN1_UP_GPIO_Port, BTN1_UP_Pin) == GPIO_PIN_RESET)
 	  {
-		  lcd_clear(&lcd1);
-		  lcd_gotoxy(&lcd1, 0, 0);
-		  lcd_puts(&lcd1, "MODE: UART");
-		  dmx_activate();
+		  //dmx_activate();
+		  gui_buttonUp();
+		  HAL_Delay(100);
 	  }
 	  if(HAL_GPIO_ReadPin(BTN2_LEFT_GPIO_Port, BTN2_LEFT_Pin) == GPIO_PIN_RESET)
 	  {
-		  lcd_clear(&lcd1);
-		  lcd_gotoxy(&lcd1, 0, 1);
-		  lcd_puts(&lcd1, "MODE: BROADCAST");
-		  broadcast_mode();
+		  //broadcast_mode();
+		  gui_buttonLeft();
+		  HAL_Delay(100);
 	  }
 	  if(HAL_GPIO_ReadPin(BTN3_RIGHT_GPIO_Port, BTN3_RIGHT_Pin) == GPIO_PIN_RESET)
 	  {
-		  lcd_clear(&lcd1);
-		  lcd_gotoxy(&lcd1, 0, 1);
-	  	  lcd_puts(&lcd1, "MODE: INDIVIDUAL");
-	  	  individual_mode();
+	  	  //individual_mode();
+		  gui_buttonRight();
+		  HAL_Delay(100);
 	  }
 	  if(HAL_GPIO_ReadPin(BTN4_DOWN_GPIO_Port, BTN4_DOWN_Pin) == GPIO_PIN_RESET)
 	  {
-		  lcd_clear(&lcd1);
-		  lcd_gotoxy(&lcd1, 0, 0);
-		  lcd_puts(&lcd1, "MODE: BLUETOOTH");
-		  bluetooth_activate();
+		  //bluetooth_activate();
+		  gui_buttonDown();
+		  HAL_Delay(100);
 	  }
     /* USER CODE END WHILE */
 

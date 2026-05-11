@@ -2,7 +2,7 @@
  * effects_list.h
  *
  *  Created on: Apr 9, 2026
- *      Author: Krumpac
+ *      Author: Vilem Broucek
  */
 
 #ifndef INC_EFFECTS_LIST_H_

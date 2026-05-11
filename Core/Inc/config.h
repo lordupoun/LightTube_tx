@@ -2,7 +2,7 @@
  * config.h
  *
  *  Created on: Sep 26, 2025
- *      Author: Krumpac
+ *      Author: Vilem Broucek
  */
 
 #ifndef INC_CONFIG_H_
