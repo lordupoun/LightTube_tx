@@ -89,6 +89,17 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 
+enum {
+    BROADCAST,
+	INDIVIDUAL
+};
+typedef uint8_t Transmit_t;
+
+enum {
+    DMX512,
+    BLUETOOTH
+};
+typedef uint8_t Mode_t;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

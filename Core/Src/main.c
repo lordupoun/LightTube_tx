@@ -30,6 +30,7 @@
 #include "si4432.h"
 #include "i2c_lcd.h"
 #include "gui.h"
+#include "flash_storage.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -75,6 +76,7 @@ SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
@@ -95,8 +97,11 @@ static uint8_t rxBuff[DMX_PACKET_SIZE+1]; 	    //receive buffer for both DMX and
 static uint8_t dmxPacket[DMX_PACKET_SIZE]; 		//One received DMX packet
 static uint8_t dmxPrevPacket[DMX_PACKET_SIZE]; 	//One previously received DMX packet
 static uint8_t txBuff[DATA_MAX_PACKET_SIZE];		//Buffer for RF TX
-Mode_t currentMode = DMX512;
-Transmit_t currentTransmit = BROADCAST;
+static Mode_t currentMode = DMX512;
+static Transmit_t currentTransmit = BROADCAST;
+static GPIO_TypeDef* clickedButtonGPIO;
+static uint16_t clickedButtonPin;
+static uint8_t holdCount=0;
 
 //the rest of variables is in main
 
@@ -107,6 +112,7 @@ static volatile bool readyToTransmit=true; //Si4432 has finished previous transm
 static volatile bool dmxCopied=false;	   //DMX / BT packet is parsed
 static volatile bool awakePacketRdy=0;	   //Time to send awake packet if 1
 static volatile bool signalLostDMX=0;	   //Signal lost  if 1
+static volatile bool debounceTimerFinished=false;
 
 /* USER CODE END PV */
 
@@ -119,6 +125,7 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -136,6 +143,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     if (htim->Instance == TIM3)
     {
     	signalLostDMX=1;
+    }
+    else if (htim->Instance == TIM4)
+    {
+    	debounceTimerFinished=true;
     }
 }
 
@@ -282,11 +293,29 @@ void bluetooth_at_commands()
 	}*/
 
 }
+void load_settings_from_EEPROM()
+{
+	uint16_t address;
+	Mode_t mode;
+	Transmit_t transmit;
+	flash_loadSettings(&address, &mode, &transmit);
+
+	currentDMXAddress=address;
+	if(mode==DMX512)
+		dmx_activate();
+	else
+		bluetooth_activate();
+	if(transmit==BROADCAST)
+		broadcast_mode();
+	else
+		individual_mode();
+}
 
 void reset_timer(TIM_HandleTypeDef *htim)
 {
 	__HAL_TIM_SET_COUNTER(htim, 0);
 }
+
 
 /* USER CODE END 0 */
 
@@ -325,15 +354,16 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
 
   //---LCD---
   lcd1.hi2c = &hi2c1;
   lcd1.address = (0x27 << 1);
   lcd_init(&lcd1);
-  gui_init(&currentMode, &currentTransmit, &currentDMXAddress, &lcd1);
   HAL_Delay(100);
-  gui_drawBase();
+  lcd_gotoxy(&lcd1,0,0);
+  lcd_puts(&lcd1, "LightTube");
   lcd_gotoxy(&lcd1, 3, 1);
   lcd_puts(&lcd1, "-LOADING-");
 
@@ -363,12 +393,14 @@ int main(void)
   //ALERT! musí být offset u rxBuff - a! pravděpodobně mi nultý paket  blbě vysílá vysílač nebo blbě přijímá přijímač - na bakalářce jsem to neměl jak zkusit
 
   //---Variables---
+  //
+  load_settings_from_EEPROM();
+  gui_init(&currentMode, &currentTransmit, &currentDMXAddress, &lcd1);
   gui_setScreen();
-
   HAL_TIM_Base_Start_IT(&htim2);
 
-  dmx_activate();
-  broadcast_mode();
+  //dmx_activate();
+  //broadcast_mode();
 
 
   /* USER CODE END 2 */
@@ -479,29 +511,95 @@ int main(void)
 	  }
 
 	 //---BUTTONS:----------------------------------------------------------
-	  if(HAL_GPIO_ReadPin(BTN1_UP_GPIO_Port, BTN1_UP_Pin) == GPIO_PIN_RESET)
+	  if(holdCount==0)
 	  {
-		  //dmx_activate();
-		  gui_buttonUp();
-		  HAL_Delay(100);
+		  if(HAL_GPIO_ReadPin(BTN1_UP_GPIO_Port, BTN1_UP_Pin) == GPIO_PIN_RESET)
+		  {
+			  //dmx_activate();
+			  //gui_buttonUp();
+			  holdCount++;
+			  clickedButtonGPIO=BTN1_UP_GPIO_Port;
+			  clickedButtonPin=BTN1_UP_Pin;
+			  reset_timer(&htim4);
+			  HAL_TIM_Base_Start_IT(&htim4);
+		  }
+		  if(HAL_GPIO_ReadPin(BTN2_LEFT_GPIO_Port, BTN2_LEFT_Pin) == GPIO_PIN_RESET)
+		  {
+			  //broadcast_mode();
+			  //gui_buttonLeft();
+			  holdCount++;
+			  clickedButtonGPIO=BTN2_LEFT_GPIO_Port;
+			  clickedButtonPin=BTN2_LEFT_Pin;
+			  reset_timer(&htim4);
+			  HAL_TIM_Base_Start_IT(&htim4);
+		  }
+		  if(HAL_GPIO_ReadPin(BTN3_RIGHT_GPIO_Port, BTN3_RIGHT_Pin) == GPIO_PIN_RESET)
+		  {
+			  //individual_mode();
+			  //gui_buttonRight();
+			  holdCount++;
+			  clickedButtonGPIO=BTN3_RIGHT_GPIO_Port;
+			  clickedButtonPin=BTN3_RIGHT_Pin;
+			  reset_timer(&htim4);
+			  HAL_TIM_Base_Start_IT(&htim4);
+		  }
+		  if(HAL_GPIO_ReadPin(BTN4_DOWN_GPIO_Port, BTN4_DOWN_Pin) == GPIO_PIN_RESET)
+		  {
+			  //bluetooth_activate();
+			  //gui_buttonDown();
+			  holdCount++;
+			  clickedButtonGPIO=BTN4_DOWN_GPIO_Port;
+			  clickedButtonPin=BTN4_DOWN_Pin;
+			  reset_timer(&htim4);
+			  HAL_TIM_Base_Start_IT(&htim4);
+		  }
+
 	  }
-	  if(HAL_GPIO_ReadPin(BTN2_LEFT_GPIO_Port, BTN2_LEFT_Pin) == GPIO_PIN_RESET)
+	  //DEBOUNCE:
+	  if(debounceTimerFinished==true)
 	  {
-		  //broadcast_mode();
-		  gui_buttonLeft();
-		  HAL_Delay(100);
-	  }
-	  if(HAL_GPIO_ReadPin(BTN3_RIGHT_GPIO_Port, BTN3_RIGHT_Pin) == GPIO_PIN_RESET)
-	  {
-	  	  //individual_mode();
-		  gui_buttonRight();
-		  HAL_Delay(100);
-	  }
-	  if(HAL_GPIO_ReadPin(BTN4_DOWN_GPIO_Port, BTN4_DOWN_Pin) == GPIO_PIN_RESET)
-	  {
-		  //bluetooth_activate();
-		  gui_buttonDown();
-		  HAL_Delay(100);
+		  HAL_TIM_Base_Stop_IT(&htim4);
+		  debounceTimerFinished=false;
+		  if(HAL_GPIO_ReadPin(clickedButtonGPIO, clickedButtonPin) == GPIO_PIN_SET)
+		  {
+			  //HAL_TIM_Base_Stop_IT(&htim4);
+			  switch(clickedButtonPin)
+			  {
+			  case BTN1_UP_Pin:
+				  gui_buttonUp();
+				  break;
+			  case BTN2_LEFT_Pin:
+				  gui_buttonLeft();
+			  	  break;
+			  case BTN3_RIGHT_Pin:
+				  gui_buttonRight();
+				  break;
+			  case BTN4_DOWN_Pin:
+				  gui_buttonDown();
+				  break;
+			  }
+			  holdCount=0;
+		  }
+		  else
+		  {
+			  if(holdCount>15)
+			  {
+				  switch(clickedButtonPin)
+				  {
+				  case BTN1_UP_Pin:
+					  gui_buttonUp();
+					  break;
+				  case BTN4_DOWN_Pin:
+					  gui_buttonDown();
+					  break;
+				  }
+			  }
+			  else
+			  {
+				  holdCount++;
+			  }
+			  HAL_TIM_Base_Start_IT(&htim4);
+		  }
 	  }
     /* USER CODE END WHILE */
 
@@ -708,6 +806,51 @@ static void MX_TIM3_Init(void)
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 7199;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 499;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
 
 }
 

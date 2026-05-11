@@ -7,6 +7,7 @@
 
 #include "gui.h"
 #include "i2c_lcd.h"
+#include "flash_storage.h"
 
 extern const ScreenItem_t mainScreen, setModeScreen, setTransmitScreen, setAddressScreen;
 extern const ScreenItem_t changeModeScreen, changeTransmitScreen, changeAddressScreen;
@@ -36,7 +37,7 @@ static uint16_t* dmxAddrPtr = 0;
 static Mode_t* currentMode;
 static Transmit_t* currentTransmit;
 
-static uint16_t localDMXAddress = 20; //Local address only for GUI, before accepting changes
+static uint16_t localDMXAddress; //Local address only for GUI, before accepting changes
 static Mode_t localCurrentMode;
 static Transmit_t localCurrentTransmit;
 static bool localSave;
@@ -221,7 +222,7 @@ void gui_setScreen()
 		case CHANGE_MODE:
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
-			lcd_puts(lcd1, "CHANGE MODE TO");
+			lcd_puts(lcd1, "CHANGE MODE TO:");
 			lcd_gotoxy(lcd1, 0, 1);
 			if(*currentMode==DMX512)
 				lcd_puts(lcd1, "MODE: DMX512");
@@ -231,7 +232,7 @@ void gui_setScreen()
 		case CHANGE_TRANSMIT:
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
-			lcd_puts(lcd1, "CHANGE TX TO");
+			lcd_puts(lcd1, "CHANGE TX TO:");
 			lcd_gotoxy(lcd1, 0, 1);
 			if(*currentTransmit==BROADCAST)
 				lcd_puts(lcd1, "TX: BROADCAST");
@@ -239,6 +240,7 @@ void gui_setScreen()
 				lcd_puts(lcd1, "TX: INDIVIDUAL");
 			break;
 		case CHANGE_ADDRESS:
+			localDMXAddress=*dmxAddrPtr;
 			lcd_clear(lcd1);
 			lcd_gotoxy(lcd1, 0, 0);
 			lcd_puts(lcd1, "CHANGE ADDRESS");
@@ -409,7 +411,7 @@ void confirmModeValue()
 void incTransmitValue()
 {
 	lcd_gotoxy(lcd1, 4, 1);
-	lcd_puts(lcd1, "         ");
+	lcd_puts(lcd1, "          ");
 	if(localCurrentTransmit==BROADCAST)
 	{
 		localCurrentTransmit=INDIVIDUAL;
@@ -468,9 +470,10 @@ void confirmSaveValue()
 	lcd_clear(lcd1);
 	lcd_gotoxy(lcd1, 0, 0);
 	lcd_puts(lcd1, "SAVING TO EEPROM");
+	flash_saveSettings(*dmxAddrPtr, *currentMode, *currentTransmit);
 	lcd_gotoxy(lcd1, 0, 1);
 	lcd_puts(lcd1, "VALUES SAVED!");
 	currentScreen=&setSaveScreen;
-	HAL_Delay(500);
+	HAL_Delay(2000);
 	gui_setScreen();
 }

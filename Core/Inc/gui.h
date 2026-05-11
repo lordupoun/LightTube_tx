@@ -9,11 +9,11 @@
 #define INC_GUI_H_
 
 #include <stdbool.h>
-#include "stm32f1xx_hal.h"
+#include "main.h"
 
 void gui_drawBase(void);
 
-typedef enum
+enum
 {
     MAIN,
     SET_MODE,
@@ -26,10 +26,11 @@ typedef enum
 	CHANGE_PRESETS,
 	SET_SAVE,
 	CHANGE_SAVE
+};
+typedef uint8_t Screen_t;
 
-} Screen_t;
 
-typedef struct ScreenItem //ToDo: predelat na union, usetrilo by FLASH
+typedef struct ScreenItem //ToDo: predelat na union, usetrilo by FLASH; preskladat dle zarovnani - usetri FLASH
 {
 	const Screen_t name;
 	const bool editable;
@@ -43,15 +44,7 @@ typedef struct ScreenItem //ToDo: predelat na union, usetrilo by FLASH
 
 } ScreenItem_t;
 
-typedef enum {
-    BROADCAST,
-	INDIVIDUAL
-} Transmit_t;
-
-typedef enum {
-    DMX512,
-    BLUETOOTH
-} Mode_t;
+//THE REST OF TYPEDEFS IS IN MAIN.H
 
 
 
