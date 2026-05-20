@@ -5,8 +5,8 @@
  *      Author: Vilem Broucek
  */
 
+#include <stdio.h>
 #include "gui.h"
-#include "i2c_lcd.h"
 #include "flash_storage.h"
 
 extern const ScreenItem_t mainScreen, setModeScreen, setTransmitScreen, setAddressScreen;

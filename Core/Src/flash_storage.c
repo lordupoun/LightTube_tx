@@ -8,7 +8,7 @@
 #include "gui.h"
 
 //CODE for EEPROM EMULATION IN FLASH WAS DESIGNED BY AI
-void flash_saveSettings(uint16_t addr, Mode_t mode, Transmit_t trans) //ToDo: ADD RESERVATION TO LINKER
+void flash_saveSettings(uint16_t addr, Mode_t mode, Transmit_t transmit) //ToDo: ADD RESERVATION TO LINKER
 {
     HAL_FLASH_Unlock();
 
@@ -27,7 +27,7 @@ void flash_saveSettings(uint16_t addr, Mode_t mode, Transmit_t trans) //ToDo: AD
 
     HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_STORAGE_ADDR + 0, (uint32_t)addr);
     HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_STORAGE_ADDR + 4, (uint32_t)mode);
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_STORAGE_ADDR + 8, (uint32_t)trans);
+    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_STORAGE_ADDR + 8, (uint32_t)transmit);
 
     HAL_FLASH_Lock();
 }

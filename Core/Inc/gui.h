@@ -10,6 +10,7 @@
 
 #include <stdbool.h>
 #include "main.h"
+#include "i2c_lcd.h"
 
 void gui_drawBase(void);
 
@@ -47,6 +48,14 @@ typedef struct ScreenItem //ToDo: predelat na union, usetrilo by FLASH; presklad
 } ScreenItem_t;
 
 //THE REST OF TYPEDEFS IS IN MAIN.H
+
+void gui_buttonUp(void);
+void gui_buttonDown(void);
+void gui_buttonLeft(void);
+void gui_buttonRight(void);
+void gui_drawSettings(void);
+void gui_init(Mode_t*, Transmit_t*, uint16_t*, I2C_LCD_HandleTypeDef*, uint8_t*);
+void gui_setScreen(void);
 
 
 

@@ -10,7 +10,8 @@
 
 #include "main.h"
 
-
+void flash_loadSettings(uint16_t*, Mode_t*, Transmit_t*);
+void flash_saveSettings(uint16_t, Mode_t, Transmit_t);
 
 
 

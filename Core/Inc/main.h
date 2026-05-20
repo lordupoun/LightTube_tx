@@ -28,7 +28,6 @@ extern "C" {
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -36,7 +35,17 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+enum {
+    BROADCAST,
+	INDIVIDUAL
+};
+typedef uint8_t Transmit_t;
 
+enum {
+    DMX512,
+    BLUETOOTH
+};
+typedef uint8_t Mode_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -51,7 +60,11 @@ extern "C" {
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
-
+void dmx_activate(void);
+void bluetooth_activate(void);
+void broadcast_mode(void);
+void individual_mode(void);
+void identify_tube_address(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
@@ -92,17 +105,6 @@ void Error_Handler(void);
 #define NUM_COMMON_CHANNELS 1
 #define NUM_CHANNELS 5
 
-enum {
-    BROADCAST,
-	INDIVIDUAL
-};
-typedef uint8_t Transmit_t;
-
-enum {
-    DMX512,
-    BLUETOOTH
-};
-typedef uint8_t Mode_t;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
